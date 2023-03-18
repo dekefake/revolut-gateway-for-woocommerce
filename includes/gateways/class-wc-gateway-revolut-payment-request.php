@@ -98,7 +98,7 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 				$this->get_wc_revolut_payment_request_params()
 			);
 
-			wp_enqueue_script( 'revolut-woocommerce-payment-request' );
+			wp_enqueue_script( 'revolut-woocommerce-payment-request' ,'','','',true );
 		} catch ( Exception $e ) {
 			$this->log_error( $e->getMessage() );
 		}
