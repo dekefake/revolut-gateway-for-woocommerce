@@ -844,7 +844,7 @@ abstract class WC_Payment_Gateway_Revolut extends WC_Payment_Gateway_CC {
 	public function payment_fields() {
 		if ( 'sandbox' === $this->api_settings->get_option( 'mode' ) ) {
 			if ( 'revolut_cc' === $this->id ) {
-				echo wp_kses_post( "<p style='color:red'>The payment gateway is in Sandbox Mode. You can use our <a href='https://developer.revolut.com/docs/accept-payments/tutorials/test-in-the-sandbox-environment/test-cards' target='_blank'>test cards</a> to simulate different payment scenarios." );
+				echo wp_kses_post( "<p style='color:red'>The payment gateway is in Sandbox Mode. You can use our <a href='https://developer.revolut.com/docs/guides/accept-payments/get-started/test-in-the-sandbox-environment/test-cards' target='_blank'>test cards</a> to simulate different payment scenarios." );
 			} elseif ( 'revolut_pay' === $this->id ) {
 				echo wp_kses_post( "<p style='color:red'>The payment gateway is in Sandbox Mode." );
 			}
