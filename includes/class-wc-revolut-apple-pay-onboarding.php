@@ -105,7 +105,7 @@ class WC_Revolut_Apple_Pay_OnBoarding {
 		$this->domain_onboarding_file_directory   = '.well-known';
 		$this->onboarding_file_dir                = untrailingslashit( ABSPATH ) . '/' . $this->domain_onboarding_file_directory;
 		$this->onboarding_file_path               = $this->onboarding_file_dir . '/' . $this->domain_onboarding_file_name;
-		$this->domain_onboarding_file_remote_link = 'https://assets.revolut.com/api-docs/merchant-api/files/domain_validation_file_prod';
+		$this->domain_onboarding_file_remote_link = 'https://assets.revolut.com/api-docs/merchant-api/files/apple-developer-merchantid-domain-association';
 
 		$this->revolut_payment_request_settings = get_option( 'woocommerce_revolut_payment_request_settings', array() );
 

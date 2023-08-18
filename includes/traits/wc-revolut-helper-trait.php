@@ -43,6 +43,10 @@ trait WC_Gateway_Revolut_Helper_Trait {
 			'capture_mode' => $capture,
 		);
 
+		if ( $is_express_checkout ) {
+			$body['cancel_authorised_after'] = WC_REVOLUT_AUTO_CANCEL_TIMEOUT;
+		}
+
 		$json = $this->api_client->post( '/orders', $body );
 
 		if ( empty( $json['id'] ) || empty( $json['public_id'] ) ) {
@@ -175,9 +179,13 @@ trait WC_Gateway_Revolut_Helper_Trait {
 
 	/**
 	 * Get Revolut customer id.
+	 *
+	 * @param int $wc_customer_id WooCommerce customer id.
 	 */
-	public function get_revolut_customer_id() {
-		$wc_customer_id = get_current_user_id();
+	public function get_revolut_customer_id( $wc_customer_id = false ) {
+		if ( ! $wc_customer_id ) {
+			$wc_customer_id = get_current_user_id();
+		}
 
 		if ( empty( $wc_customer_id ) ) {
 			return null;
@@ -259,8 +267,8 @@ trait WC_Gateway_Revolut_Helper_Trait {
 		return $this->uuid_dashes(
 			$wpdb->get_col( // phpcs:ignore
 				$wpdb->prepare(
-					'SELECT HEX(order_id) FROM ' . $wpdb->prefix . "wc_revolut_orders
-                WHERE public_id=UNHEX(REPLACE(%s, '-', ''))",
+					'SELECT HEX(order_id) FROM ' . $wpdb->prefix . 'wc_revolut_orders
+                WHERE public_id=UNHEX(REPLACE(%s, "-", ""))',
 					array( $public_id )
 				)
 			)
@@ -361,7 +369,19 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 * @return array|string|null
 	 */
 	protected function get_revolut_public_id() {
-		return WC()->session->get( "{$this->api_client->mode}_revolut_public_id" );
+		$public_id = WC()->session->get( "{$this->api_client->mode}_revolut_public_id" );
+
+		if ( empty( $public_id ) ) {
+			return null;
+		}
+
+		$order_id = $this->get_revolut_order_by_public_id( $public_id );
+
+		if ( empty( $order_id ) ) {
+			return null;
+		}
+
+		return $public_id;
 	}
 
 	/**
@@ -505,7 +525,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 *
 	 * @param string $submit request key.
 	 */
-	public function check_is_get_data_submited( $submit ) {
+	public function check_is_get_data_submitted( $submit ) {
 		return isset( $_GET[ $submit ] );  // phpcs:ignore
 	}
 
@@ -514,7 +534,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 *
 	 * @param string $submit request key.
 	 */
-	public function check_is_post_data_submited( $submit ) {
+	public function check_is_post_data_submitted( $submit ) {
 		return isset( $_POST[ $submit ] );  // phpcs:ignore
 	}
 
@@ -593,12 +613,74 @@ trait WC_Gateway_Revolut_Helper_Trait {
 
 		$order_status                 = ( 0 !== strpos( $order_status, 'wc-' ) ) ? 'wc-' . $order_status : $order_status;
 		$selected_capture_status_list = $this->api_settings->get_option( 'selected_capture_status_list' );
-		$customise_capture_status     = $this->api_settings->get_option( 'customise_capture_status' );
+		$customize_capture_status     = $this->api_settings->get_option( 'customise_capture_status' );
 
-		if ( empty( $selected_capture_status_list ) || 'no' === $customise_capture_status ) {
+		if ( empty( $selected_capture_status_list ) || 'no' === $customize_capture_status ) {
 			$selected_capture_status_list = array( 'wc-processing', 'wc-completed' );
 		}
 
 		return in_array( $order_status, $selected_capture_status_list, true );
+	}
+
+	/**
+	 * Check order contains cashback offer
+	 *
+	 * @param String $revolut_order_id order id.
+	 */
+	public function check_is_order_has_cashback_offer( $revolut_order_id ) {
+		if ( empty( $revolut_order_id ) ) {
+			return false;
+		}
+
+		$revolut_order = $this->api_client->get( '/orders/' . $revolut_order_id );
+
+		if ( ! isset( $revolut_order['payments'] ) || empty( $revolut_order['payments'][0] ) || empty( $revolut_order['payments'][0]['token'] ) ) {
+			return false;
+		}
+
+		$payment_token  = $revolut_order['payments'][0]['token'];
+		$cashback_offer = $this->api_client->public_request( '/cashback', array( 'Revolut-Payment-Token' => $payment_token ), 'GET' );
+
+		if ( ! empty( $cashback_offer ) && isset( $cashback_offer['value'] )
+			&& ! empty( $cashback_offer['value']['currency'] )
+			&& ! empty( $cashback_offer['value']['amount'] )
+		) {
+			$cashback_currency = $cashback_offer['value']['currency'];
+			$cashback_amount   = $this->get_wc_order_total( $cashback_offer['value']['amount'], $cashback_currency );
+
+			return array(
+				'payment_token'     => $payment_token,
+				'cashback_currency' => $cashback_currency,
+				'cashback_amount'   => $cashback_amount,
+			);
+		}
+
+		return false;
+	}
+
+	/**
+	 * Register a cashback candidate
+	 *
+	 * @param String $payment_token order id.
+	 * @param String $billing_phone customer billing phone.
+	 *
+	 * @return mixed
+	 * @throws Exception Exception.
+	 */
+	public function register_cashback_candidate( $payment_token, $billing_phone ) {
+		if ( empty( $payment_token ) || empty( $billing_phone ) ) {
+			return false;
+		}
+
+		$this->api_client->public_request(
+			'/cashback',
+			array( 'Revolut-Payment-Token' => $payment_token ),
+			'POST',
+			array(
+				'phone'             => $billing_phone,
+				'marketing_consent' => true,
+			)
+		);
+
 	}
 }

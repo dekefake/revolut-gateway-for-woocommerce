@@ -35,6 +35,7 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 
 		parent::__construct();
 
+		add_filter( 'wc_revolut_settings_nav_tabs', array( $this, 'admin_nav_tab' ), 2 );
 		add_action( 'wc_ajax_revolut_payment_request_add_to_cart', array( $this, 'revolut_payment_request_ajax_add_to_cart' ) );
 		add_action( 'wc_ajax_revolut_payment_request_get_shipping_options', array( $this, 'revolut_payment_request_ajax_get_shipping_options' ) );
 		add_action( 'wc_ajax_revolut_payment_request_update_shipping_method', array( $this, 'revolut_payment_request_ajax_update_shipping_method' ) );
@@ -48,7 +49,7 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 
 		add_action( 'woocommerce_after_add_to_cart_quantity', array( $this, 'display_payment_request_button_html' ), 2 );
 		add_action( 'woocommerce_proceed_to_checkout', array( $this, 'display_payment_request_button_html' ), 2 );
-		add_action( 'wp_enqueue_scripts', array( $this, 'revolut_enqueue_payment_request_scripts' ));
+		add_action( 'wp_enqueue_scripts', array( $this, 'revolut_enqueue_payment_request_scripts' ) );
 	}
 
 	/**
@@ -76,6 +77,18 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 	 */
 	public function revolut_enqueue_payment_request_scripts() {
 		try {
+			wp_localize_script(
+				'revolut-woocommerce',
+				'revolut_payment_request_button_style',
+				array(
+					'payment_request_button_title'  => $this->get_option( 'title' ),
+					'payment_request_button_type'   => $this->get_option( 'payment_request_button_type' ),
+					'payment_request_button_theme'  => $this->get_option( 'payment_request_button_theme' ),
+					'payment_request_button_radius' => $this->get_option( 'payment_request_button_radius' ),
+					'payment_request_button_size'   => $this->get_option( 'payment_request_button_size' ),
+				)
+			);
+
 			if ( ! $this->page_supports_payment_request_button( $this->get_option( 'payment_request_button_locations' ) ) ) {
 				return false;
 			}
@@ -98,7 +111,7 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 				$this->get_wc_revolut_payment_request_params()
 			);
 
-			wp_enqueue_script( 'revolut-woocommerce-payment-request' ,'','','',true );
+			wp_enqueue_script( 'revolut-woocommerce-payment-request' );
 		} catch ( Exception $e ) {
 			$this->log_error( $e->getMessage() );
 		}
@@ -155,15 +168,25 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 	 * Check is payment method available
 	 */
 	public function is_available() {
-		if ( ( 'yes' === $this->enabled && is_product() ) || ( $this->check_is_post_data_submited( 'payment_method' ) && $this->get_post_request_data( 'payment_method' ) === $this->id ) ) {
+		if ( ( 'yes' === $this->enabled && is_product() ) || ( $this->check_is_post_data_submitted( 'payment_method' ) && $this->get_post_request_data( 'payment_method' ) === $this->id ) ) {
 			return true;
+		}
+
+		$payment_request_button_locations = $this->get_option( 'payment_request_button_locations' );
+
+		if ( empty( $payment_request_button_locations ) ) {
+			$payment_request_button_locations = array();
+		}
+
+		if ( is_checkout() ) {
+			return in_array( 'checkout', $payment_request_button_locations, true ) && ! $this->api_settings->is_sandbox();
 		}
 
 		return false;
 	}
 
 	/**
-	 * Initialise Gateway Settings Form Fields
+	 * Initialize Gateway Settings Form Fields
 	 */
 	public function init_form_fields() {
 		$this->form_fields = array(
@@ -180,6 +203,13 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 				'type'        => 'checkbox',
 				'description' => __( 'If enabled, users will be able to pay using Apple Pay (Safari & iOS), Google Pay (Chrome & Android) or native W3C Payment Requests if supported by the browser.', 'revolut-gateway-for-woocommerce' ),
 				'default'     => 'yes',
+				'desc_tip'    => true,
+			),
+			'title'                            => array(
+				'title'       => __( 'Title', 'revolut-gateway-for-woocommerce' ),
+				'type'        => 'text',
+				'description' => __( 'This controls the title that the user sees during checkout. Plugin will add the button\'s name (Apple Pay or Google Pay) before this title.', 'revolut-gateway-for-woocommerce' ),
+				'default'     => '(via Revolut)',
 				'desc_tip'    => true,
 			),
 			'payment_request_button_type'      => array(
@@ -240,8 +270,9 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 				'desc_tip'          => true,
 				'class'             => 'wc-enhanced-select',
 				'options'           => array(
-					'product' => __( 'Product', 'revolut-gateway-for-woocommerce' ),
-					'cart'    => __( 'Cart', 'revolut-gateway-for-woocommerce' ),
+					'product'  => __( 'Product', 'revolut-gateway-for-woocommerce' ),
+					'cart'     => __( 'Cart', 'revolut-gateway-for-woocommerce' ),
+					'checkout' => __( 'Checkout', 'revolut-gateway-for-woocommerce' ),
 				),
 				'default'           => array( 'product', 'cart' ),
 				'custom_attributes' => array(
@@ -423,10 +454,10 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 			$wc_order_data = $wc_billing_address;
 		}
 
-		$wc_order_data['ship_to_different_address']     = $this->get_posted_integer_data( 'shipping_required' );
-		$wc_order_data['revolut_pay_express_checkkout'] = $this->get_post_request_data( 'revolut_gateway' ) === 'revolut_pay';
-		$wc_order_data['terms']                         = 1;
-		$wc_order_data['order_comments']                = '';
+		$wc_order_data['ship_to_different_address']    = $this->get_posted_integer_data( 'shipping_required' );
+		$wc_order_data['revolut_pay_express_checkout'] = $this->get_post_request_data( 'revolut_gateway' ) === 'revolut_pay';
+		$wc_order_data['terms']                        = 1;
+		$wc_order_data['order_comments']               = '';
 
 		return $wc_order_data;
 	}
@@ -525,7 +556,7 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 
 			$product_id     = $this->get_posted_integer_data( 'product_id' );
 			$is_revolut_pay = $this->get_posted_integer_data( 'is_revolut_pay' );
-			$qty            = ! $this->check_is_post_data_submited( 'qty' ) ? 1 : $this->get_posted_integer_data( 'qty' );
+			$qty            = ! $this->check_is_post_data_submitted( 'qty' ) ? 1 : $this->get_posted_integer_data( 'qty' );
 			$product        = wc_get_product( $product_id );
 			$product_type   = $product->get_type();
 			$global_cart    = WC()->cart;
@@ -538,7 +569,7 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 
 			if ( 'simple' === $product_type || 'subscription' === $product_type ) {
 				WC()->cart->add_to_cart( $product->get_id(), $qty );
-			} elseif ( $this->check_is_post_data_submited( 'attributes' ) && ( 'variable' === $product_type || 'variable-subscription' === $product_type ) ) {
+			} elseif ( $this->check_is_post_data_submitted( 'attributes' ) && ( 'variable' === $product_type || 'variable-subscription' === $product_type ) ) {
 				$attributes   = $this->get_post_request_data( 'attributes' );
 				$data_store   = WC_Data_Store::load( 'product' );
 				$variation_id = $data_store->find_matching_product_variation( $product, $attributes );
@@ -689,6 +720,38 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 			$data['total']['amount'] = 0;
 			wp_send_json( $data );
 		}
+	}
+
+	/**
+	 * Display Revolut Pay icon
+	 */
+	public function get_icon() {
+		$icons_str = '';
+
+		$icons_str .= '<img src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/apple-pay-logo.svg" class="revolut-apple-pay-logo" style="max-width:50px;display:none" alt="Apple Pay" />';
+		$icons_str .= '<img src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/g-pay-logo.png" class="revolut-google-pay-logo" style="max-width:50px;display:none" alt="Google Pay" />';
+
+		return apply_filters( 'woocommerce_gateway_icon', $icons_str, $this->id );
+	}
+
+	/**
+	 * Add public_id field and logo on card form
+	 *
+	 * @param String $public_id            Revolut public id.
+	 * @param String $merchant_public_key  Revolut public key.
+	 * @param String $display_tokenization Available saved card tokens.
+	 *
+	 * @return string
+	 */
+	public function generate_inline_revolut_form( $public_id, $merchant_public_key, $display_tokenization ) {
+		$total          = WC()->cart->get_total( '' );
+		$currency       = get_woocommerce_currency();
+		$total          = $this->get_revolut_order_total( $total, $currency );
+		$mode           = $this->api_settings->get_option( 'mode' );
+		$shipping_total = $this->get_cart_total_shipping();
+
+		return '<div id="woocommerce-revolut-payment-request-element" class="revolut-payment-request" data-mode="' . $mode . '" data-shipping-total="' . $shipping_total . '" data-currency="' . $currency . '" data-total="' . $total . '" data-textcolor="" data-locale="' . $this->get_lang_iso_code() . '" data-public-id="' . $public_id . '"  data-merchant-public-key="' . $merchant_public_key . '"></div>
+		<input type="hidden" id="wc_' . $this->id . '_payment_nonce" name="wc_' . $this->id . '_payment_nonce" />';
 	}
 
 }

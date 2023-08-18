@@ -100,8 +100,11 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 	public function get_shipping_options( $shipping_address ) {
 		$shipping_options = array();
 
+		$GLOBALS['wp']->query_vars['rest_route'] = 'wc/store/v3/cart';
+
 		$chosen_shipping_methods = WC()->session->get( 'chosen_shipping_methods' );
 		$this->calculate_shipping( $shipping_address );
+		WC()->cart->calculate_totals();
 
 		$packages = WC()->shipping->get_packages();
 
@@ -116,11 +119,14 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 		}
 
 		foreach ( $package['rates'] as $rate ) {
+			$shipping_cost = (float) $rate->get_cost() + (float) $rate->get_shipping_tax();
+			$shipping_cost = wc_format_decimal( $shipping_cost, wc_get_price_decimals() );
+
 			$shipping_options[] = array(
 				'id'          => $rate->id,
-				'label'       => $rate->label . ' ' . $rate->cost . ' ' . get_woocommerce_currency(),
+				'label'       => $rate->label . ' ' . $shipping_cost . ' ' . get_woocommerce_currency(),
 				'description' => '',
-				'amount'      => $rate->cost * 100,
+				'amount'      => $shipping_cost * 100,
 			);
 		}
 
@@ -212,7 +218,7 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 			foreach ( $variation_attributes as $attribute_name => $attribute_values ) {
 				$attribute_key = 'attribute_' . sanitize_title( $attribute_name );
 
-				if ( $this->check_is_get_data_submited( $attribute_key ) ) {
+				if ( $this->check_is_get_data_submitted( $attribute_key ) ) {
 					$attributes[ $attribute_key ] = sanitize_text_field( wp_unslash( $_GET[ $attribute_key ] ) ); // phpcs:ignore
 				} else {
 					$attributes[ $attribute_key ] = $product->get_variation_default_attribute( $attribute_name );
@@ -290,6 +296,7 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 				'publicToken'                   => $this->get_merchant_public_api_key(),
 				'ajax_url'                      => WC_AJAX::get_endpoint( '%%wc_revolut_gateway_ajax_endpoint%%' ),
 				'revolut_public_id'             => $revolut_public_id,
+				'revolut_pay_origin_url'        => str_replace( array( 'https://', 'http://' ), '', get_site_url() ),
 				'revolut_pay_button_theme'      => ! empty( $revolut_pay_settings['revolut_pay_button_theme'] ) ? $revolut_pay_settings['revolut_pay_button_theme'] : '',
 				'revolut_pay_button_size'       => ! empty( $revolut_pay_settings['revolut_pay_button_size'] ) ? $revolut_pay_settings['revolut_pay_button_size'] : '',
 				'revolut_pay_button_radius'     => ! empty( $revolut_pay_settings['revolut_pay_button_radius'] ) ? $revolut_pay_settings['revolut_pay_button_radius'] : '',
@@ -334,15 +341,11 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 	public function create_express_checkout_public_id() {
 		$revolut_public_id = $this->get_revolut_express_checkout_public_id();
 		$descriptor        = $this->get_revolut_order_descriptor();
-		$this->log_info( 'get_revolut_express_checkout_public_id: ' . $revolut_public_id );
 		if ( null === $revolut_public_id ) {
-			$this->log_info( 'create_revolut_order' );
 			$revolut_public_id = $this->create_revolut_order( $descriptor, true );
 			$this->set_revolut_express_checkout_public_id( $revolut_public_id );
 		} else {
-			$this->log_info( 'update_revolut_order: ' );
 			$revolut_public_id = $this->update_revolut_order( $descriptor, $revolut_public_id, true );
-			$this->log_info( 'update_revolut_order: ' . $revolut_public_id );
 			$this->set_revolut_express_checkout_public_id( $revolut_public_id );
 		}
 

@@ -18,3 +18,136 @@
 .revolut-pay{
 	height: auto;
 }
+
+.revolut-pay-register-banner-container{
+	box-sizing: border-box;
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	padding: 10px 16px;
+	gap: 16px;
+	position: relative;
+	background: #FFFFFF;
+	border: 1px solid #BBC4CD;
+	border-radius: 16px;
+	cursor: pointer;
+}
+
+
+.revolut-pay-register-banner-tittle-container{
+	display: flex;
+	flex-direction: column;
+	align-items: flex-start;
+	width: min-content;
+	padding: 0px;
+	flex: none;
+	order: 0;
+	flex-grow: 1;
+}
+
+.revolut-pay-register-banner-tittle{
+	font-style: normal;
+	font-weight: 500;
+	font-size: 16px;
+	line-height: 22px;	
+	letter-spacing: -0.1px;
+	font-feature-settings: 'case' on;	
+	color: #191C1F;
+	flex: none;
+	order: 0;
+	align-self: stretch;
+	flex-grow: 0;
+}
+
+.revolut-pay-register-banner-desc{
+	font-style: normal;
+	font-weight: 400;
+	font-size: 14px;
+	line-height: 22px;
+	letter-spacing: -0.1px;
+	color: #75808A;
+	flex: none;
+	order: 1;
+	align-self: stretch;
+	flex-grow: 0;
+	word-wrap: break-word;
+}
+
+.revolut-pay-register-banner-link-small-icon {
+	width: 24px;
+	height: 24px;
+	background: rgba(255, 255, 255, 0.0001);
+	flex: none;
+	order: 0;
+	flex-grow: 0;
+	outline: none !important;
+}
+
+.revolut-pay-register-banner-link {
+	text-decoration: none !important;
+	display: flex;
+	flex-direction: row;
+	align-items: center;
+	width: 108px;
+	height: 40px;
+	justify-content: center;
+	background: #E6F0FD;
+	border-radius: 999px;
+	flex: none;
+	order: 0;
+	flex-grow: 0;
+}
+
+.revolut-pay-register-banner-link span{
+	height: 22px;
+	font-style: normal;
+	font-weight: 500;
+	font-size: 14px;
+	line-height: 22px;
+	display: flex;
+	align-items: center;
+	letter-spacing: -0.1px;
+	color: #0666EB;
+	flex: none;
+	order: 1;
+	flex-grow: 0;
+}
+
+.revolut-pay-register-banner-tittle-success{
+	display: none;
+}
+
+@media (max-width: 1024px) {
+	.revolut-pay-register-banner-link {
+		width: 90px;
+	}
+}
+
+@media (max-width: 800px) {
+	.revolut-pay-register-banner-container {
+		justify-content: center;
+		box-sizing: border-box;
+		display: flex;
+		flex-direction: row;
+		align-items: center;
+		flex-wrap: wrap;
+		gap:none;
+	}
+
+	.revolut-pay-register-banner-tittle-container {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		text-align: center;
+		padding: 0px;
+		flex: none;
+		order: 0;
+		flex-grow: 1;
+		flex: 1 1 auto;
+		align-self: auto;
+	}
+
+	.revolut-pay-register-banner-link {
+		width: 90%;
+	}
+}

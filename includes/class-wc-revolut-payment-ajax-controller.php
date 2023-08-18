@@ -33,34 +33,26 @@ class WC_Revolut_Payment_Ajax_Controller {
 		$this->api_settings = revolut_wc()->api_settings;
 		$this->api_client   = new WC_Revolut_API_Client( $this->api_settings );
 
-		add_action(
-			'wc_ajax_wc_revolut_validate_checkout_fields',
-			array(
-				$this,
-				'wc_revolut_validate_checkout_fields',
-			)
-		);
-		add_action(
-			'wc_ajax_wc_revolut_get_order_pay_billing_info',
-			array(
-				$this,
-				'wc_revolut_get_order_pay_billing_info',
-			)
-		);
+		add_action( 'wc_ajax_wc_revolut_validate_checkout_fields', array( $this, 'wc_revolut_validate_checkout_fields' ) );
+		add_action( 'wc_ajax_wc_revolut_validate_order_pay_form', array( $this, 'wc_revolut_validate_order_pay_form' ) );
+		add_action( 'wc_ajax_wc_revolut_get_order_pay_billing_info', array( $this, 'wc_revolut_get_order_pay_billing_info' ) );
 		add_action( 'wc_ajax_wc_revolut_get_customer_info', array( $this, 'wc_revolut_get_customer_info' ) );
 		add_action( 'wc_ajax_wc_revolut_process_payment_result', array( $this, 'wc_revolut_process_payment_result' ) );
+		add_action( 'wc_ajax_wc_revolut_register_cashback_candidate', array( $this, 'wc_revolut_register_cashback_candidate' ) );
 		add_action( 'wc_ajax_revolut_payment_request_cancel_order', array( $this, 'revolut_payment_request_ajax_cancel_order' ) );
 		add_action( 'wc_ajax_revolut_payment_request_set_error_message', array( $this, 'revolut_payment_request_ajax_set_error_message' ) );
 		add_action( 'wc_ajax_revolut_payment_request_log_error', array( $this, 'revolut_payment_request_ajax_log_error' ) );
+		add_action( 'wc_ajax_revolut_payment_request_log_error', array( $this, 'revolut_payment_request_ajax_log_error' ) );
 
-		add_action( 'wp_ajax_wc_revolut_set_webhook', array( $this, 'wc_revolut_set_webhook' ) );
-		add_action(
-			'wp_ajax_wc_revolut_onboard_applepay_domain',
-			array(
-				$this,
-				'wc_revolut_onboard_applepay_domain',
-			)
-		);
+		if ( is_admin() ) {
+			add_action( 'wp_ajax_wc_revolut_set_webhook', array( $this, 'wc_revolut_set_webhook' ) );
+			add_action( 'wp_ajax_wc_revolut_clear_records', array( $this, 'wc_revolut_clear_records' ) );
+			add_action(
+				'wp_ajax_wc_revolut_onboard_applepay_domain',
+				array( $this, 'wc_revolut_onboard_applepay_domain' )
+			);
+		}
+
 	}
 
 	/**
@@ -82,7 +74,12 @@ class WC_Revolut_Payment_Ajax_Controller {
 					)
 				);
 
-				throw new Exception( __( 'We are unable to process your order, please try again.', 'woocommerce' ) );
+				$revolut_payment_error = $this->get_post_request_data( 'revolut_payment_error' );
+
+				if ( empty( $revolut_payment_error ) ) {
+					$revolut_payment_error = __( 'We are unable to process your order, please try again.', 'woocommerce' );
+				}
+				throw new Exception( $revolut_payment_error );
 			}
 
 			$revolut_gateway = new WC_Gateway_Revolut_CC();
@@ -123,11 +120,11 @@ class WC_Revolut_Payment_Ajax_Controller {
 	 */
 	public function wc_revolut_set_webhook() {
 		try {
-			if ( $this->check_is_post_data_submited( 'apiKey' ) || empty( $this->get_post_request_data( 'apiKey' ) ) ) {
+			if ( $this->check_is_post_data_submitted( 'apiKey' ) || empty( $this->get_post_request_data( 'apiKey' ) ) ) {
 				wp_die( false );
 			}
 
-			if ( ! $this->check_is_post_data_submited( 'mode' ) || empty( $this->get_post_request_data( 'mode' ) ) ) {
+			if ( ! $this->check_is_post_data_submitted( 'mode' ) || empty( $this->get_post_request_data( 'mode' ) ) ) {
 				wp_die( false );
 			}
 
@@ -256,35 +253,119 @@ class WC_Revolut_Payment_Ajax_Controller {
 	}
 
 	/**
+	 * Clear unused order records
+	 *
+	 * @throws Exception Exception.
+	 */
+	public function wc_revolut_clear_records() {
+		try {
+			global $wpdb;
+			$result = $wpdb->query( $wpdb->prepare( 'DELETE FROM `' . $wpdb->prefix . 'wc_revolut_orders` WHERE wc_order_id is NUll or wc_order_id = "";' ) ); // phpcs:ignore
+
+			if ( ! $result && ! empty( $wpdb->last_error ) ) {
+				throw new Exception( $wpdb->last_error );
+			}
+
+			wp_send_json(
+				array(
+					'success' => true,
+					'result'  => $result,
+				)
+			);
+		} catch ( Exception $e ) {
+			$this->log_error( $e->getMessage() );
+			wp_send_json(
+				array(
+					'success' => false,
+					'message' => $e->getMessage(),
+				)
+			);
+		}
+	}
+
+	/**
 	 * Validate checkout fields
 	 *
 	 * @throws Exception Exception.
 	 */
 	public function wc_revolut_validate_checkout_fields() {
-		wc_maybe_define_constant( 'WOOCOMMERCE_CHECKOUT', true );
+		try {
+			wc_maybe_define_constant( 'WOOCOMMERCE_CHECKOUT', true );
 
-		do_action( 'woocommerce_before_checkout_process' );
+			if ( WC()->cart->is_empty() ) {
+				/* translators: %s: shop cart url */
+				throw new Exception( sprintf( __( 'Sorry, your session has expired. <a href="%s" class="wc-backward">Return to shop</a>', 'woocommerce' ), esc_url( wc_get_page_permalink( 'shop' ) ) ) );
+			}
 
-		if ( WC()->cart->is_empty() ) {
-			/* translators: %s: shop cart url */
-			throw new Exception( sprintf( __( 'Sorry, your session has expired. <a href="%s" class="wc-backward">Return to shop</a>', 'woocommerce' ), esc_url( wc_get_page_permalink( 'shop' ) ) ) );
+			$validate_checkout = new WC_Revolut_Validate_Checkout();
+			$validate_checkout->validate_checkout_fields();
+
+			if ( 0 === wc_notice_count( 'error' ) ) {
+				wp_send_json(
+					array(
+						'result' => 'success',
+					)
+				);
+			}
+
+			$validate_checkout->return_ajax_failure_response();
+		} catch ( Exception $e ) {
+			$this->log_error( 'wc_revolut_register_cashback_candidate: ' . $e );
+
+			wc_add_notice( $e->getMessage(), 'error' );
+			$messages = wc_print_notices( true );
+			$response = array(
+				'result'   => 'failure',
+				'messages' => isset( $messages ) ? $messages : '',
+			);
+
+			wp_send_json( $response );
 		}
+	}
 
-		do_action( 'woocommerce_checkout_process' );
+	/**
+	 * Validate checkout fields
+	 *
+	 * @throws Exception Exception.
+	 */
+	public function wc_revolut_validate_order_pay_form() {
+		try {
+			$nonce_value = wc_get_var( $this->get_post_request_data( 'woocommerce-pay-nonce' ), $this->get_post_request_data( '_wpnonce' ) );
 
-		$validate_checkout = new WC_Revolut_Validate_Checkout();
+			if ( ! wp_verify_nonce( $nonce_value, 'woocommerce-pay' ) ) {
+				throw new Exception( __( 'Something went wrong.', 'woocommerce' ) );
+			}
 
-		$validate_checkout->validate_checkout_fields();
+			$order_key = $this->get_post_request_data( 'wc_order_key' );
+			$order_id  = $this->get_posted_integer_data( 'wc_order_id' );
+			$order     = wc_get_order( $order_id );
 
-		if ( 0 === wc_notice_count( 'error' ) ) {
+			if ( $order_id === $order->get_id() && hash_equals( $order->get_order_key(), $order_key ) && $order->needs_payment() ) {
+				do_action( 'woocommerce_before_pay_action', $order );
+				if ( ! empty( $this->get_posted_integer_data( 'terms-field' ) && empty( $this->get_post_request_data( 'terms' ) ) ) ) {
+					throw new Exception( __( 'Please read and accept the terms and conditions to proceed with your order.', 'woocommerce' ) );
+				}
+			} else {
+				throw new Exception( __( 'Something went wrong.', 'woocommerce' ) );
+			}
+
 			wp_send_json(
 				array(
 					'result' => 'success',
 				)
 			);
-		}
+		} catch ( Exception $e ) {
+			$this->log_error( 'wc_revolut_validate_order_pay_form: ' . $e->getMessage() );
 
-		$validate_checkout->return_ajax_failure_response();
+			wc_add_notice( $e->getMessage(), 'error' );
+
+			wp_send_json(
+				array(
+					'result'   => 'failure',
+					'messages' => wc_print_notices( true ),
+				)
+			);
+		}
 	}
 
 	/**
@@ -389,5 +470,45 @@ class WC_Revolut_Payment_Ajax_Controller {
 	public function revolut_payment_request_ajax_log_error() {
 		$error_message = $this->get_post_request_data( 'revolut_payment_request_error' );
 		$this->log_error( $error_message );
+	}
+
+	/**
+	 * Register a cashback candidate
+	 *
+	 * @throws Exception Exception.
+	 */
+	public function wc_revolut_register_cashback_candidate() {
+		try {
+			check_ajax_referer( 'wc-revolut-register-cashback-candidate', 'security' );
+			$wc_order_id = $this->get_post_request_data( 'wc_order_id' );
+			if ( empty( $wc_order_id ) ) {
+				throw new Exception( __( 'Empty wc_order_id parameter' ) );
+			}
+
+			$wc_order = wc_get_order( $wc_order_id );
+
+			if ( empty( $wc_order->get_id() ) ) {
+				throw new Exception( __( 'Can not find wc order' ) );
+			}
+
+			$payment_token_id = $wc_order->get_meta( 'revolut_payment_token', true );
+
+			if ( empty( $payment_token_id ) ) {
+				throw new Exception( __( 'Can not find payment_token_id' ) );
+			}
+
+			$billing_phone = $wc_order->get_billing_phone();
+
+			if ( empty( $billing_phone ) ) {
+				throw new Exception( __( 'Can not find billing_phone' ) );
+			}
+
+			$this->register_cashback_candidate( $payment_token_id, $billing_phone );
+			update_post_meta( $wc_order_id, 'cashback_registered', true );
+			wp_send_json( array( 'success' => true ) );
+		} catch ( Exception $e ) {
+			wp_send_json( array( 'success' => false ) );
+			$this->log_error( 'wc_revolut_register_cashback_candidate: ' . $e );
+		}
 	}
 }

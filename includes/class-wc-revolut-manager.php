@@ -68,6 +68,7 @@ class WC_Revolut_Manager {
 
 		// settings.
 		include_once REVOLUT_PATH . 'includes/settings/class-wc-revolut-settings-api.php';
+		include_once REVOLUT_PATH . 'includes/settings/class-wc-revolut-advanced-settings.php';
 		include_once REVOLUT_PATH . '/includes/class-wc-revolut-payment-tokens.php';
 
 		// allow other plugins to provide their own settings class.
@@ -88,6 +89,7 @@ class WC_Revolut_Manager {
 		new WC_Revolut_Payment_Ajax_Controller();
 		new WC_Gateway_Revolut_Payment_Request();
 		new WC_Gateway_Revolut_Pay();
+		new WC_Revolut_Advanced_Settings();
 	}
 }
 

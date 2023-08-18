@@ -9,10 +9,10 @@ jQuery(document).ready(function ($) {
   const capture_checkbox = $('#woocommerce_revolut_accept_capture')
   const capture_checkbox_container = capture_checkbox.parents().closest('tr')
 
-  const customise_capture_status_checkbox = $(
+  const customize_capture_status_checkbox = $(
     '#woocommerce_revolut_customise_capture_status',
   )
-  const customise_capture_status_checkbox_container = customise_capture_status_checkbox
+  const customize_capture_status_checkbox_container = customize_capture_status_checkbox
     .parents()
     .closest('tr')
 
@@ -22,13 +22,13 @@ jQuery(document).ready(function ($) {
   $('#woocommerce_revolut_payment_request_onboard_applepay').hide()
 
   if (!capture_checkbox.is(':checked')) {
-    customise_capture_status_checkbox_container.hide()
+    customize_capture_status_checkbox_container.hide()
     capture_status.hide()
   } else {
-    customise_capture_status_checkbox_container.show()
+    customize_capture_status_checkbox_container.show()
   }
 
-  if (!customise_capture_status_checkbox.is(':checked')) {
+  if (!customize_capture_status_checkbox.is(':checked')) {
     capture_status.hide()
   }
 
@@ -44,11 +44,11 @@ jQuery(document).ready(function ($) {
     capture_checkbox_container.show()
   } else {
     capture_checkbox_container.hide()
-    customise_capture_status_checkbox_container.hide()
+    customize_capture_status_checkbox_container.hide()
     capture_status.hide()
   }
 
-  customise_capture_status_checkbox.on('change', function () {
+  customize_capture_status_checkbox.on('change', function () {
     capture_status.toggle($(this).is(':checked'))
     if (!$(this).is(':checked')) {
       $('#woocommerce_revolut_selected_capture_status_list').val(null).trigger('change')
@@ -56,8 +56,8 @@ jQuery(document).ready(function ($) {
   })
 
   capture_checkbox.on('change', function () {
-    customise_capture_status_checkbox_container.toggle($(this).is(':checked'))
-    customise_capture_status_checkbox.change()
+    customize_capture_status_checkbox_container.toggle($(this).is(':checked'))
+    customize_capture_status_checkbox.change()
 
     if (!$(this).is(':checked')) {
       capture_status.hide()
@@ -83,7 +83,8 @@ jQuery(document).ready(function ($) {
       capture_checkbox.change()
     } else {
       capture_checkbox_container.hide()
-      customise_capture_status_checkbox_container.hide()
+      customize_capture_status_checkbox_container.hide()
+      capture_status.hide()
     }
   })
 
@@ -172,9 +173,77 @@ jQuery(document).ready(function ($) {
     if ($('#woocommerce_revolut_cc_card_widget_type').val() === 'popup') {
       $('#woocommerce_revolut_cc_styling_title').hide()
       $('#woocommerce_revolut_cc_widget_styling').parents('table').hide()
+      $('#woocommerce_revolut_cc_enable_cardholder_name').parents('tr').hide()
     } else {
       $('#woocommerce_revolut_cc_styling_title').show()
       $('#woocommerce_revolut_cc_widget_styling').parents('table').show()
+      $('#woocommerce_revolut_cc_enable_cardholder_name').parents('tr').show()
     }
   }
+
+  $('#woocommerce_revolut_advanced_settings_clear_unused_order_records').hide()
+
+  const consent_clear_unused_order_records = $(
+    '#woocommerce_revolut_advanced_settings_consent_clear_unused_order_records',
+  )
+
+  consent_clear_unused_order_records.change(function () {
+    if ($(this).is(':checked')) {
+      consent_clear_unused_order_records.removeAttr('style')
+    } else {
+      consent_clear_unused_order_records.css({ borderColor: 'red' })
+    }
+  })
+
+  $('.revolut_clear_unused_order_records').click(function (e) {
+    e.preventDefault()
+    self = $(this)
+
+    if (!consent_clear_unused_order_records.is(':checked')) {
+      consent_clear_unused_order_records.css({ borderColor: 'red' })
+      alert(
+        'Please indicate that you have read and agree to the consequences of this operation.',
+      )
+      return false
+    }
+
+    $.blockUI({
+      message: null,
+      overlayCSS: { background: '#fff', opacity: 0.6 },
+    })
+
+    $.ajax({
+      type: 'POST',
+      url: ajaxurl,
+      data: {
+        action: 'wc_revolut_clear_records',
+      },
+      success: function (response) {
+        $.unblockUI()
+        if (response && !response.success) {
+          return alert(response.message)
+        }
+
+        alert('Operation completed successfully.')
+      },
+      error: function (jqXHR, textStatus, errorThrown) {
+        $.unblockUI()
+        if (jqXHR && jqXHR.responseText) {
+          let response = jqXHR.responseText.match(/{(.*?)}/)
+          if (response.length > 0 && response[0]) {
+            try {
+              response = JSON.parse(response[0])
+              if (response.message) {
+                alert(response.message)
+                return false
+              }
+            } catch (e) {
+              // swallow error and handle in generic block below
+            }
+          }
+        }
+        alert(errorThrown)
+      },
+    })
+  })
 })

@@ -13,29 +13,25 @@ jQuery(function ($) {
       paymentRequest.destroy()
     }
 
-    $.ajax({
-      type: 'POST',
-      data: {
-        revolut_payment_request_error: message,
-      },
-      url: getAjaxURL('set_error_message'),
-      success: function () {
-        window.location.reload()
-      },
-      error: function () {
-        window.location.reload()
-      },
+    sendRequest(getAjaxURL('set_error_message'), {
+      revolut_payment_request_error: message,
     })
+      .then(response => {
+        window.location.reload()
+      })
+      .catch(error => {
+        window.location.reload()
+      })
   }
 
   function logError(message) {
-    $.ajax({
-      type: 'POST',
-      data: {
+    sendRequest(
+      getAjaxURL('log_error'),
+      {
         revolut_payment_request_error: message,
       },
-      url: getAjaxURL('log_error'),
-    })
+      false,
+    )
   }
 
   function getAjaxURL(endpoint, controller = 'revolut_payment_request_') {
@@ -109,28 +105,21 @@ jQuery(function ($) {
         product_data['attributes'] = getProductAttributes()
       }
 
-      $.ajax({
-        type: 'POST',
-        data: product_data,
-        url: getAjaxURL('add_to_cart'),
-        success: function (response) {
-          if (!response.success) {
-            if (revpay) {
-              displayErrorMessage(
-                wc_revolut_payment_request_params.error_messages.cart_create_failed,
-              )
-              return resolve(false)
-            }
-
-            handleError(
+      sendRequest(getAjaxURL('add_to_cart'), product_data).then(response => {
+        if (!response.success) {
+          if (revpay) {
+            displayErrorMessage(
               wc_revolut_payment_request_params.error_messages.cart_create_failed,
             )
             return resolve(false)
           }
-          wc_revolut_payment_request_params.total = response.total.amount
-          wc_revolut_payment_request_params.nonce.checkout = response.checkout_nonce
-          resolve(response)
-        },
+
+          handleError(wc_revolut_payment_request_params.error_messages.cart_create_failed)
+          return resolve(false)
+        }
+        wc_revolut_payment_request_params.total = response.total.amount
+        wc_revolut_payment_request_params.nonce.checkout = response.checkout_nonce
+        resolve(response)
       })
     })
   }
@@ -150,21 +139,17 @@ jQuery(function ($) {
     }
 
     return new Promise((resolve, reject) => {
-      $.ajax({
-        type: 'POST',
-        data: address_data,
-        url: getAjaxURL('get_shipping_options'),
-        success: function (response) {
+      sendRequest(getAjaxURL('get_shipping_options'), address_data)
+        .then(response => {
           if (response['shippingOptions'] && response['shippingOptions'].length !== 0) {
             orderSelectedShippingOption = response['shippingOptions'][0]['id']
           }
 
           resolve(response)
-        },
-        error: function (error) {
+        })
+        .catch(error => {
           reject(error)
-        },
-      })
+        })
     })
   }
 
@@ -177,17 +162,13 @@ jQuery(function ($) {
     }
 
     return new Promise((resolve, reject) => {
-      $.ajax({
-        type: 'POST',
-        data: shipping_option_data,
-        url: getAjaxURL('update_shipping_method'),
-        success: function (response) {
+      sendRequest(getAjaxURL('update_shipping_method'), shipping_option_data)
+        .then(response => {
           resolve(response)
-        },
-        error: function (error) {
+        })
+        .catch(error => {
           reject(error)
-        },
-      })
+        })
     })
   }
 
@@ -198,33 +179,27 @@ jQuery(function ($) {
     }
 
     return new Promise((resolve, reject) => {
-      $.ajax({
-        type: 'POST',
-        data: shipping_option_data,
-        url: getAjaxURL('update_payment_total'),
-        success: function (response) {
+      sendRequest(getAjaxURL('update_payment_total'), shipping_option_data)
+        .then(response => {
           resolve(response)
-        },
-        error: function (error) {
+        })
+        .catch(error => {
           reject(error)
-        },
-      })
+        })
     })
   }
 
   function udpateExpressCheckoutParams(revpay = false) {
     return new Promise((resolve, reject) => {
-      $.ajax({
-        type: 'POST',
-        data: {
+      sendRequest(
+        getAjaxURL(revpay ? 'get_express_checkout_params' : 'get_payment_request_params'),
+        {
           security: revpay
             ? wc_revolut_payment_request_params.nonce.get_express_checkout_params
             : wc_revolut_payment_request_params.nonce.get_payment_request_params,
         },
-        url: getAjaxURL(
-          revpay ? 'get_express_checkout_params' : 'get_payment_request_params',
-        ),
-        success: function (response) {
+      )
+        .then(response => {
           if (response.success) {
             wc_revolut_payment_request_params.revolut_public_id =
               response.revolut_public_id
@@ -232,30 +207,25 @@ jQuery(function ($) {
             return resolve()
           }
           reject('')
-        },
-        error: function (error) {
+        })
+        .catch(error => {
           reject(error)
-        },
-      })
+        })
     })
   }
 
   function loadOrderData() {
     return new Promise((resolve, reject) => {
-      $.ajax({
-        type: 'POST',
-        data: {
-          revolut_public_id: wc_revolut_payment_request_params.revolut_public_id,
-          security: wc_revolut_payment_request_params.nonce.load_order_data,
-        },
-        url: getAjaxURL('load_order_data'),
-        success: function (response) {
-          resolve(response)
-        },
-        error: function (error) {
-          reject(error)
-        },
+      sendRequest(getAjaxURL('load_order_data'), {
+        revolut_public_id: wc_revolut_payment_request_params.revolut_public_id,
+        security: wc_revolut_payment_request_params.nonce.load_order_data,
       })
+        .then(response => {
+          resolve(response)
+        })
+        .catch(error => {
+          reject(error)
+        })
     })
   }
 
@@ -263,16 +233,11 @@ jQuery(function ($) {
     $.blockUI({ message: null, overlayCSS: { background: '#fff', opacity: 0.6 } })
 
     return new Promise((resolve, reject) => {
-      $.ajax({
-        type: 'POST',
-        data: {
-          revolut_public_id: wc_revolut_payment_request_params.revolut_public_id,
-          security: wc_revolut_payment_request_params.nonce.cancel_order,
-        },
-        url: getAjaxURL('cancel_order'),
-        success: function (response) {
-          handleError(messages)
-        },
+      sendRequest(getAjaxURL('cancel_order'), {
+        revolut_public_id: wc_revolut_payment_request_params.revolut_public_id,
+        security: wc_revolut_payment_request_params.nonce.cancel_order,
+      }).then(response => {
+        handleError(messages)
       })
     })
   }
@@ -290,11 +255,8 @@ jQuery(function ($) {
     data['revolut_save_payment_method'] = 0
     data['wc-revolut_cc-payment-token'] = ''
 
-    $.ajax({
-      type: 'POST',
-      data: data,
-      url: getAjaxURL('process_payment_result', 'wc_revolut_'),
-      success: function (response) {
+    sendRequest(getAjaxURL('process_payment_result', 'wc_revolut_'), data).then(
+      response => {
         if (response.result === 'success') {
           window.location.href = response.redirect
           return
@@ -308,26 +270,23 @@ jQuery(function ($) {
 
         cancelOrder(response.messages)
       },
-    })
+    )
   }
 
   function submitWooCommerceOrder(payment_method = 'revolut_payment_request') {
     return new Promise((resolve, reject) => {
-      $.ajax({
-        type: 'POST',
-        data: {
-          payment_method: payment_method,
-          _wpnonce: wc_revolut_payment_request_params.nonce.checkout,
-          shipping_method: [orderSelectedShippingOption],
-          payment_request_type: paymentRequestType,
-          revolut_public_id: wc_revolut_payment_request_params.revolut_public_id,
-          shipping_required: wc_revolut_payment_request_params.shipping_required ? 1 : 0,
-          address_info: address_info,
-          revolut_create_wc_order: 1,
-          is_express_checkout: 1,
-        },
-        url: getAjaxURL('create_order'),
-        success: function (response) {
+      sendRequest(getAjaxURL('create_order'), {
+        payment_method: payment_method,
+        _wpnonce: wc_revolut_payment_request_params.nonce.checkout,
+        shipping_method: [orderSelectedShippingOption],
+        payment_request_type: paymentRequestType,
+        revolut_public_id: wc_revolut_payment_request_params.revolut_public_id,
+        shipping_required: wc_revolut_payment_request_params.shipping_required ? 1 : 0,
+        address_info: address_info,
+        revolut_create_wc_order: 1,
+        is_express_checkout: 1,
+      })
+        .then(response => {
           if (true === response.reload) {
             window.location.reload()
             return
@@ -343,16 +302,15 @@ jQuery(function ($) {
           }
           logError('submitWooCommerceOrder failed: ' + JSON.stringify(response))
           return cancelOrder($(response.messages).text())
-        },
-        error: function (jqXHR, textStatus, errorThrown) {
-          cancelOrder(errorThrown)
-        },
-      })
+        })
+        .catch(error => {
+          cancelOrder(error)
+        })
     })
   }
 
   function displayErrorMessage(message) {
-    if (!message.includes('woocommerce-error')) {
+    if (message && !message.includes('woocommerce-error')) {
       message = `<div class="woocommerce-error">${message}</div>`
     }
 
@@ -497,26 +455,36 @@ jQuery(function ($) {
           size: wc_revolut_payment_request_params.revolut_pay_button_size,
           radius: wc_revolut_payment_request_params.revolut_pay_button_radius,
         },
+        __metadata: {
+          environment: 'woocommerce',
+          context: wc_revolut_payment_request_params.is_cart_page ? 'cart' : 'product',
+          origin_url: wc_revolut_payment_request_params.revolut_pay_origin_url,
+        },
       })
 
       instance.revolutPay.on('payment', function (event) {
         switch (event.type) {
           case 'success':
             $.blockUI({ message: null, overlayCSS: { background: '#fff', opacity: 0.6 } })
-
-            loadOrderData().then(function (order_data) {
-              address_info = order_data.address_info
-              orderSelectedShippingOption = order_data.selected_shipping_option
-              submitWooCommerceOrder('revolut_pay')
-                .then(function () {
-                  submitOrder('', 'revolut_pay')
-                })
-                .catch(error => {
-                  displayErrorMessage(error)
-                  $.unblockUI()
-                  $('.blockUI.blockOverlay').hide()
-                })
-            })
+            loadOrderData()
+              .then(function (order_data) {
+                address_info = order_data.address_info
+                orderSelectedShippingOption = order_data.selected_shipping_option
+                submitWooCommerceOrder('revolut_pay')
+                  .then(function () {
+                    submitOrder('', 'revolut_pay')
+                  })
+                  .catch(error => {
+                    displayErrorMessage([error])
+                    $.unblockUI()
+                    $('.blockUI.blockOverlay').hide()
+                  })
+              })
+              .catch(error => {
+                displayErrorMessage([error])
+                $.unblockUI()
+                $('.blockUI.blockOverlay').hide()
+              })
             break
           case 'error':
             displayErrorMessage(event.error.message)
@@ -555,4 +523,33 @@ jQuery(function ($) {
 
   initPaymentRequestButton()
   initRevolutPayExpressCheckoutButton()
+
+  function buildFormData(formData, data, parentKey) {
+    if (data && typeof data === 'object') {
+      Object.keys(data).forEach(key => {
+        buildFormData(formData, data[key], parentKey ? `${parentKey}[${key}]` : key)
+      })
+    } else {
+      const value = data == null ? '' : data
+      formData.append(parentKey, value)
+    }
+  }
+
+  function sendRequest(url, data, logError = true) {
+    const requestData = new FormData()
+    buildFormData(requestData, data)
+
+    return fetch(url, {
+      method: 'POST',
+      body: requestData,
+    })
+      .then(response => response.json())
+      .catch(error => {
+        if (logError) {
+          logError(error)
+        }
+
+        throw error
+      })
+  }
 })

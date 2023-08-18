@@ -46,11 +46,18 @@ trait WC_Revolut_Settings_Trait {
 	 * Display navigation for settings page
 	 */
 	public function output_settings_nav() {
-		if ( $this->check_is_get_data_submited( 'page' ) && $this->check_is_get_data_submited( 'section' ) ) {
-			$is_revolut_section = 'wc-settings' === $this->get_request_data( 'page' ) && in_array( $this->get_request_data( 'section' ), WC_REVOLUT_GATEWAYS, true );
+		if ( $this->check_is_get_data_submitted( 'page' ) && $this->check_is_get_data_submitted( 'section' ) ) {
+			$is_revolut_section = 'wc-settings' === $this->get_request_data( 'page' ) && in_array( $this->get_request_data( 'section' ), WC_REVOLUT_GATEWAYS, true ) || $this->get_request_data( 'section' ) === 'revolut_advanced_settings';
 			if ( $is_revolut_section ) {
 				include REVOLUT_PATH . 'templates/html-settings-nav.php';
 			}
 		}
+	}
+
+	/**
+	 * Check API mode
+	 */
+	public function is_sandbox() {
+		return 'sandbox' === $this->get_option( 'mode' );
 	}
 }

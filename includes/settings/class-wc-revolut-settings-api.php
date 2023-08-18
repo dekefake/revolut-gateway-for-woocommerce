@@ -33,7 +33,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	 * Add required filters
 	 */
 	public function hooks() {
-		add_filter( 'wc_revolut_settings_nav_tabs', array( $this, 'admin_nav_tab' ) );
+		add_filter( 'wc_revolut_settings_nav_tabs', array( $this, 'admin_nav_tab' ), 1 );
 		add_action( 'woocommerce_settings_checkout', array( $this, 'output_settings_nav' ) );
 		add_action( 'woocommerce_settings_checkout', array( $this, 'admin_options' ) );
 		add_action( 'admin_notices', array( $this, 'add_revolut_description' ) );
@@ -44,7 +44,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	}
 
 	/**
-	 * Initialise Settings Form Fields
+	 * Initialize Settings Form Fields
 	 */
 	public function init_form_fields() {
 		$mode            = $this->get_option( 'mode' );
@@ -107,7 +107,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 				'description' => __(
 					'Select "Authorize Only" mode. This allows the payment to be captured up to 7 days after the user has placed the order (e.g. when the goods are shipped or received). 
                 If not selected, Revolut will try to authorize and capture all payments.',
-					'woocommece-gateway-revolut'
+					'revolut-gateway-for-woocommerce'
 				),
 				'desc_tip'    => true,
 			),
@@ -120,7 +120,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 			),
 			'customise_capture_status'     => array(
 				'title'       => '',
-				'label'       => __( 'Customise status to trigger capture.', 'revolut-gateway-for-woocommerce' ),
+				'label'       => __( 'Customize status to trigger capture.', 'revolut-gateway-for-woocommerce' ),
 				'type'        => 'checkbox',
 				'description' => __( 'Default when checkbox not selected: Processing, Completed', 'revolut-gateway-for-woocommerce' ),
 				'default'     => 'yes',
@@ -140,6 +140,13 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 					'data-placeholder' => __( 'Select status', 'revolut-gateway-for-woocommerce' ),
 				),
 			),
+			'disable_banner'               => array(
+				'title'       => 'Banner Visibility',
+				'label'       => __( 'Customers can get instructions to signup to Revolut and get rewarded.', 'revolut-gateway-for-woocommerce' ),
+				'type'        => 'checkbox',
+				'description' => 'This will allow them to pay via Revolut Pay the next time they visit your store and checkout faster.',
+				'default'     => 'yes',
+			),
 		);
 	}
 
@@ -147,7 +154,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	 * Displays configuration page with tabs
 	 */
 	public function admin_options() {
-		if ( $this->check_is_get_data_submited( 'page' ) && $this->check_is_get_data_submited( 'section' ) ) {
+		if ( $this->check_is_get_data_submitted( 'page' ) && $this->check_is_get_data_submitted( 'section' ) ) {
 			$is_revolut_api_section = 'wc-settings' === $this->get_request_data( 'page' ) && 'revolut' === $this->get_request_data( 'section' );
 
 			if ( $is_revolut_api_section ) {
@@ -164,7 +171,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	 * @since 2.0.0
 	 */
 	public function add_revolut_description() {
-		if ( $this->check_is_get_data_submited( 'page' ) && $this->check_is_get_data_submited( 'section' ) ) {
+		if ( $this->check_is_get_data_submitted( 'page' ) && $this->check_is_get_data_submitted( 'section' ) ) {
 			$is_revolut_section = 'wc-settings' === $this->get_request_data( 'page' ) && in_array( $this->get_request_data( 'section' ), WC_REVOLUT_GATEWAYS, true );
 
 			if ( $is_revolut_section ) {
@@ -231,7 +238,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	 * Add admin notice when set up failed
 	 */
 	public function check_api_key() {
-		if ( $this->check_is_get_data_submited( 'page' ) && $this->check_is_get_data_submited( 'section' ) ) {
+		if ( $this->check_is_get_data_submitted( 'page' ) && $this->check_is_get_data_submitted( 'section' ) ) {
 			$is_revolut_section = 'wc-settings' === $this->get_request_data( 'page' ) && in_array( $this->get_request_data( 'section' ), WC_REVOLUT_GATEWAYS, true );
 
 			if ( $is_revolut_section ) {
@@ -348,7 +355,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 			$mode = $this->get_option( 'mode' );
 			$mode = empty( $mode ) ? 'sandbox' : $mode;
 
-			if ( $this->get_option( 'revolut_pay_synchronous_webhook_domain' ) === $web_hook_url ) {
+			if ( $this->get_option( 'revolut_pay_synchronous_webhook_domain_' . $mode ) === $web_hook_url ) {
 				return true;
 			}
 
@@ -360,7 +367,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 			$response   = $api_client->post( '/synchronous-webhooks', $body );
 
 			if ( isset( $response['signing_key'] ) && ! empty( $response['signing_key'] ) ) {
-				$this->update_option( 'revolut_pay_synchronous_webhook_domain', $web_hook_url );
+				$this->update_option( 'revolut_pay_synchronous_webhook_domain_' . $mode, $web_hook_url );
 				$this->add_success_message( __( 'Synchronous Webhook url successfully configured', 'revolut-gateway-for-woocommerce' ) );
 				return true;
 			}
@@ -396,7 +403,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	 *
 	 * @param string $submit request key.
 	 */
-	public function check_is_get_data_submited( $submit ) {
+	public function check_is_get_data_submitted( $submit ) {
         return isset( $_GET[ $submit ] );  // phpcs:ignore
 	}
 

@@ -42,6 +42,7 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 		$this->revolut_saved_cards = 'yes' === $this->get_option( 'revolut_saved_cards' );
 
 		add_action( 'wp_enqueue_scripts', array( $this, 'load_payment_scripts' ) );
+		add_filter( 'wc_revolut_settings_nav_tabs', array( $this, 'admin_nav_tab' ), 4 );
 
 		if ( class_exists( 'WC_Subscriptions_Order' ) ) {
 			add_action( 'woocommerce_scheduled_subscription_payment_' . $this->id, array( $this, 'scheduled_subscription_payment' ), 10, 2 );
@@ -86,7 +87,7 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 	}
 
 	/**
-	 * Initialise Gateway Settings Form Fields
+	 * Initialize Gateway Settings Form Fields
 	 */
 	public function init_form_fields() {
 		$this->form_fields = array(
@@ -124,12 +125,20 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 				'default'     => 'yes',
 				'desc_tip'    => true,
 			),
+			'enable_cardholder_name'  => array(
+				'title'       => __( 'Cardholder\'s Name Field', 'revolut-gateway-for-woocommerce' ),
+				'label'       => __( 'Enable', 'revolut-gateway-for-woocommerce' ),
+				'type'        => 'checkbox',
+				'default'     => 'no',
+				'description' => __( 'When enabled, input for Cardholder\'s Name will be activated.', 'revolut-gateway-for-woocommerce' ),
+				'desc_tip'    => true,
+			),
 			'styling_title'           => array(
 				'title' => __( 'Card widget style', 'revolut-gateway-for-woocommerce' ),
 				'type'  => 'title',
 			),
 			'widget_styling'          => array(
-				'title'       => __( 'Customise card widget style', 'revolut-gateway-for-woocommerce' ),
+				'title'       => __( 'Customize card widget style', 'revolut-gateway-for-woocommerce' ),
 				'label'       => __( 'Enable', 'revolut-gateway-for-woocommerce' ),
 				'type'        => 'checkbox',
 				'description' => __( 'By enabling this option you can customize the style of the Revolut card widget', 'revolut-gateway-for-woocommerce' ),
@@ -300,7 +309,7 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 			} else {
 				$wc_token = $this->save_payment_method( $revolut_order_id );
 				if ( null === $wc_token ) {
-					throw new Exception( 'An error occured while saving payment method' );
+					throw new Exception( 'An error occurred while saving payment method' );
 				}
 			}
 
@@ -459,8 +468,8 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 	public function get_icon() {
 		$icons_str = '';
 
-		$icons_str .= '<img src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/visa.svg" style="max-width: 40px" alt="Visa" />';
-		$icons_str .= '<img src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/mastercard.svg" style="max-width: 40px" alt="MasterCard" />';
+		$icons_str .= '<img src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/visa.svg" style="margin-left:2px" alt="Visa" />';
+		$icons_str .= '<img src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/mastercard.svg" alt="MasterCard" />';
 
 		return apply_filters( 'woocommerce_gateway_icon', $icons_str, $this->id );
 	}
@@ -471,7 +480,7 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 	 * @return bool
 	 */
 	public function update_all_subscriptions_payment_method() {
-		return $this->check_is_post_data_submited( 'wc-' . $this->id . '-update-subs-payment-method-card' ) || $this->check_is_post_data_submited( 'update_all_subscriptions_payment_method' );
+		return $this->check_is_post_data_submitted( 'wc-' . $this->id . '-update-subs-payment-method-card' ) || $this->check_is_post_data_submitted( 'update_all_subscriptions_payment_method' );
 	}
 
 	/**
@@ -480,7 +489,7 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 	 * @return bool
 	 */
 	public function is_using_saved_payment_method() {
-		return ( $this->check_is_post_data_submited( 'wc-' . $this->id . '-payment-token' ) && ! empty( $this->get_post_request_data( 'wc-' . $this->id . '-payment-token' ) && 'new' !== $this->get_post_request_data( 'wc-' . $this->id . '-payment-token' ) ) );
+		return ( $this->check_is_post_data_submitted( 'wc-' . $this->id . '-payment-token' ) && ! empty( $this->get_post_request_data( 'wc-' . $this->id . '-payment-token' ) && 'new' !== $this->get_post_request_data( 'wc-' . $this->id . '-payment-token' ) ) );
 	}
 
 	/**
@@ -529,7 +538,16 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 		$hide_fieldset       = $this->get_option( 'card_widget_type' ) === 'popup' || $this->get_request_data( 'pay_for_order' ) ? 'height:0px;padding:0' : '';
 		$shipping_total      = $this->get_cart_total_shipping();
 		$hide_payment_method = ! empty( $hide_fieldset ) && ! $display_tokenization ? true : false;
-		return '<fieldset id="wc-' . $this->id . '-cc-form" class="wc-credit-card-form wc-payment-form" style="background:transparent;' . $hide_fieldset . '">
+
+		$cardholder_name_field = '';
+
+		if ( 'yes' === $this->get_option( 'enable_cardholder_name', 'yes' ) && ! $hide_fieldset ) {
+			$cardholder_name_field .= '<p class="form-row form-row-first validate-required" id="cardholder-name" data-priority="10" style="display: block;width:100%;float:none">';
+			$cardholder_name_field .= '<span class="woocommerce-input-wrapper"><input type="text" class="input-text" name="wc-revolut-cardholder-name" id="wc-revolut-cardholder-name" placeholder="Cardholder name" autocomplete="cardholder" required></span>';
+			$cardholder_name_field .= '</p>';
+		}
+
+		return '<fieldset id="wc-' . $this->id . '-cc-form" class="wc-credit-card-form wc-payment-form" style="background:transparent;' . $hide_fieldset . '"> ' . $cardholder_name_field . '
         <div style="background: ' . $this->get_option( 'widget_background_color' ) . ';' . $hide_fieldset . '" id="woocommerce-revolut-card-element" data-mode="' . $mode . '" data-shipping-total="' . $shipping_total . '" data-currency="' . $currency . '" data-total="' . $total . '" data-textcolor="' . $this->get_option( 'widget_text_color' ) . '" data-widget-type="' . $this->get_option( 'card_widget_type' ) . '" data-hide-payment-method="' . $hide_payment_method . '" data-locale="' . $this->get_lang_iso_code() . '" data-public-id="' . $public_id . '" data-merchant-public-key="' . $merchant_public_key . '" data-save-payment-for="' . $this->save_payment_method_for . '" data-payment-method-save-is-mandatory="' . $this->is_save_payment_method_mandatory() . '"></div>' . $this->getSvgImage() . '</fieldset>';
 	}
 
@@ -580,7 +598,7 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 			return false;
 		}
 
-		return $this->check_is_get_data_submited( 'change_payment_method' ) || $this->cart_contains_subscription();
+		return $this->check_is_get_data_submitted( 'change_payment_method' ) || $this->cart_contains_subscription();
 	}
 
 	/**

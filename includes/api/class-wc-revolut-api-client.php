@@ -92,6 +92,13 @@ class WC_Revolut_API_Client {
 	public $api_url;
 
 	/**
+	 * Public Api url
+	 *
+	 * @var string
+	 */
+	public $mgmt_api_url;
+
+	/**
 	 * API settings
 	 *
 	 * @var WC_Revolut_Settings_API
@@ -142,10 +149,10 @@ class WC_Revolut_API_Client {
 	/**
 	 * Send request to API
 	 *
-	 * @param String $path             Api path.
-	 * @param String $method           Request method.
-	 * @param null   $body             Request body.
-	 * @param bool   $is_mgmt_endpoint Management API indicator.
+	 * @param String     $path             Api path.
+	 * @param String     $method           Request method.
+	 * @param array|null $body             Request body.
+	 * @param bool       $is_mgmt_endpoint Management API indicator.
 	 *
 	 * @return mixed
 	 * @throws Exception Exception.
@@ -181,6 +188,47 @@ class WC_Revolut_API_Client {
 		if ( $is_mgmt_endpoint ) {
 			$url = $this->mgmt_api_url . $path;
 		}
+
+		$response      = wp_remote_request( $url, $request );
+		$response_body = wp_remote_retrieve_body( $response );
+
+		if ( wp_remote_retrieve_response_code( $response ) >= 400 && wp_remote_retrieve_response_code( $response ) < 500 && 'GET' !== $method ) {
+			$this->log_error( "Failed request to URL $method $url" );
+			$this->log_error( $response_body );
+			throw new Exception( "Something went wrong: $method $url\n" . $response_body );
+		}
+
+		return json_decode( $response_body, true );
+	}
+
+	/**
+	 * Send request to public API
+	 *
+	 * @param String     $path             Api path.
+	 * @param array      $headers          Request method.
+	 * @param String     $method           Request method.
+	 * @param array|null $body             Request body.
+	 *
+	 * @return mixed
+	 * @throws Exception Exception.
+	 */
+	public function public_request( $path, $headers, $method = 'POST', $body = null ) {
+		global $wp_version;
+		global $woocommerce;
+
+		$headers['User-Agent']   = 'Revolut Payment Gateway/' . WC_GATEWAY_REVOLUT_VERSION . ' WooCommerce/' . $woocommerce->version . ' Wordpress/' . $wp_version . ' PHP/' . PHP_VERSION;
+		$headers['Content-Type'] = 'application/json';
+
+		$request = array(
+			'headers' => $headers,
+			'method'  => $method,
+		);
+
+		if ( null !== $body ) {
+			$request['body'] = wp_json_encode( $body );
+		}
+
+		$url = $this->mgmt_api_url . '/public/' . $path;
 
 		$response      = wp_remote_request( $url, $request );
 		$response_body = wp_remote_retrieve_body( $response );

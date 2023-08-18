@@ -59,7 +59,7 @@ class Revolut_Webhook_Controller extends \WC_REST_Data_Controller {
 	}
 
 	/**
-	 * Revolut webhool callback request
+	 * Revolut webhook callback request
 	 *
 	 * @param WP_REST_Request $request WP REST Request.
 	 *
