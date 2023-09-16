@@ -277,6 +277,30 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 	}
 
 	/**
+	 * Get redirect URL.
+	 */
+	public function get_redirect_url() {
+		global $post;
+
+		if ( is_product() ) {
+			return get_permalink( $post->ID );
+		} elseif ( wc_post_content_has_shortcode( 'product_page' ) ) {
+			// Get id from product_page shortcode.
+			preg_match( '/\[product_page id="(?<id>\d+)"\]/', $post->post_content, $shortcode_match );
+
+			if ( isset( $shortcode_match['id'] ) ) {
+				return get_permalink( $shortcode_match['id'] );
+			}
+		}
+
+		if ( is_cart() ) {
+			return wc_get_cart_url();
+		}
+
+		return wc_get_checkout_url();
+	}
+
+	/**
 	 * Get parameters
 	 */
 	public function get_wc_revolut_payment_request_params() {
@@ -321,6 +345,7 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 					'clear_cart'                  => wp_create_nonce( 'wc-revolut-clear-cart' ),
 				),
 				'is_product_page'               => $this->is_product(),
+				'redirect_url'                  => $this->get_redirect_url(),
 				'is_cart_page'                  => is_cart(),
 				'product'                       => $this->get_product_data(),
 				'shipping_required'             => $this->is_shipping_required(),

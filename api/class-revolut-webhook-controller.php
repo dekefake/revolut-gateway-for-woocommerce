@@ -74,13 +74,7 @@ class Revolut_Webhook_Controller extends \WC_REST_Data_Controller {
 		$this->log_info( $parameters );
 
 		if ( in_array( 'shipping_address', array_keys( $parameters ), true ) ) {
-			WC()->initialize_session();
-			WC()->initialize_cart();
-
 			$this->convert_revolut_order_metadata_into_wc_session( $parameters['order_id'] );
-
-			WC()->cart->get_cart();
-
 			$requested_address              = $parameters['shipping_address'];
 			$requested_address['address']   = $requested_address['street_line_1'];
 			$requested_address['address_2'] = '';

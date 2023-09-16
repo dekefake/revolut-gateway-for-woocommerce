@@ -13,13 +13,12 @@
  * WC_Gateway_Revolut_CC class.
  */
 class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
-
-
+	const GATEWAY_ID = 'revolut_cc';
 	/**
 	 * Constructor
 	 */
 	public function __construct() {
-		$this->id           = 'revolut_cc';
+		$this->id           = self::GATEWAY_ID;
 		$this->method_title = __( 'Revolut Gateway - Credit Cards', 'revolut-gateway-for-woocommerce' );
 		$this->tab_title    = __( 'Credit Cards', 'revolut-gateway-for-woocommerce' );
 
@@ -539,6 +538,8 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 		$shipping_total      = $this->get_cart_total_shipping();
 		$hide_payment_method = ! empty( $hide_fieldset ) && ! $display_tokenization ? true : false;
 
+		$display_banner = $this->api_settings->get_option( 'disable_banner' ) === 'yes' ? '<div id="revolut-upsell-banner"></div>' : '';
+
 		$cardholder_name_field = '';
 
 		if ( 'yes' === $this->get_option( 'enable_cardholder_name', 'yes' ) && ! $hide_fieldset ) {
@@ -548,7 +549,7 @@ class WC_Gateway_Revolut_CC extends WC_Payment_Gateway_Revolut {
 		}
 
 		return '<fieldset id="wc-' . $this->id . '-cc-form" class="wc-credit-card-form wc-payment-form" style="background:transparent;' . $hide_fieldset . '"> ' . $cardholder_name_field . '
-        <div style="background: ' . $this->get_option( 'widget_background_color' ) . ';' . $hide_fieldset . '" id="woocommerce-revolut-card-element" data-mode="' . $mode . '" data-shipping-total="' . $shipping_total . '" data-currency="' . $currency . '" data-total="' . $total . '" data-textcolor="' . $this->get_option( 'widget_text_color' ) . '" data-widget-type="' . $this->get_option( 'card_widget_type' ) . '" data-hide-payment-method="' . $hide_payment_method . '" data-locale="' . $this->get_lang_iso_code() . '" data-public-id="' . $public_id . '" data-merchant-public-key="' . $merchant_public_key . '" data-save-payment-for="' . $this->save_payment_method_for . '" data-payment-method-save-is-mandatory="' . $this->is_save_payment_method_mandatory() . '"></div>' . $this->getSvgImage() . '</fieldset>';
+        <div style="background: ' . $this->get_option( 'widget_background_color' ) . ';' . $hide_fieldset . '" id="woocommerce-revolut-card-element" data-mode="' . $mode . '" data-shipping-total="' . $shipping_total . '" data-currency="' . $currency . '" data-total="' . $total . '" data-textcolor="' . $this->get_option( 'widget_text_color' ) . '" data-widget-type="' . $this->get_option( 'card_widget_type' ) . '" data-hide-payment-method="' . $hide_payment_method . '" data-locale="' . $this->get_lang_iso_code() . '" data-public-id="' . $public_id . '" data-merchant-public-key="' . $merchant_public_key . '" data-save-payment-for="' . $this->save_payment_method_for . '" data-payment-method-save-is-mandatory="' . $this->is_save_payment_method_mandatory() . '"></div>' . $this->getSvgImage() . $display_banner . '</fieldset>';
 	}
 
 	/**

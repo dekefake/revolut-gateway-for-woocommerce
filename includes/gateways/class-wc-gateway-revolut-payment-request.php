@@ -19,12 +19,13 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 
-
+	const GATEWAY_ID = 'revolut_payment_request';
 	/**
 	 * Constructor
 	 */
 	public function __construct() {
-		$this->id = 'revolut_payment_request';
+
+		$this->id = self::GATEWAY_ID;
 
 		$this->method_title = __( 'Apple Pay / Google Pay', 'revolut-gateway-for-woocommerce' );
 		/* translators:%1s: %$2s: */
@@ -402,135 +403,11 @@ class WC_Gateway_Revolut_Payment_Request extends WC_Payment_Gateway_Revolut {
 			throw new Exception( 'Address information is missing' );
 		}
 
-		if ( empty( $address_info['billingAddress'] ) ) {
-			throw new Exception( 'Billing address is missing' );
-		}
-
-		if ( $this->get_posted_integer_data( 'shipping_required' ) && empty( $address_info['shippingAddress'] ) ) {
-			throw new Exception( 'Shipping address is missing' );
-		}
-
-		if ( empty( $address_info['email'] ) ) {
-			throw new Exception( 'User Email information is missing' );
-		}
-
-		$revolut_billing_address         = $address_info['billingAddress'];
-		$revolut_customer_email          = $address_info['email'];
-		$revolut_customer_full_name      = ! empty( $revolut_billing_address['recipient'] ) ? $revolut_billing_address['recipient'] : '';
-		$revolut_customer_billing_phone  = ! empty( $revolut_billing_address['phone'] ) ? $revolut_billing_address['phone'] : '';
-		$revolut_customer_shipping_phone = '';
-		$wc_shipping_address             = array();
-
-		list($billing_firstname, $billing_lastname) = $this->parse_customer_name( $revolut_customer_full_name );
-
-		if ( isset( $address_info['shippingAddress'] ) && ! empty( $address_info['shippingAddress'] ) ) {
-			$revolut_shipping_address            = $address_info['shippingAddress'];
-			$revolut_customer_shipping_phone     = ! empty( $revolut_shipping_address['phone'] ) ? $revolut_shipping_address['phone'] : '';
-			$revolut_customer_shipping_full_name = ! empty( $revolut_shipping_address['recipient'] ) ? $revolut_shipping_address['recipient'] : '';
-
-			$shipping_firstname = $billing_firstname;
-			$shipping_lastname  = $billing_lastname;
-
-			if ( ! empty( $revolut_customer_shipping_full_name ) ) {
-				list($shipping_firstname, $shipping_lastname) = $this->parse_customer_name( $revolut_customer_shipping_full_name );
-			}
-
-			if ( empty( $revolut_customer_shipping_phone ) && ! empty( $revolut_customer_billing_phone ) ) {
-				$revolut_customer_shipping_phone = $revolut_customer_billing_phone;
-			}
-
-			$wc_shipping_address = $this->get_wc_shipping_address( $revolut_shipping_address, $revolut_customer_email, $revolut_customer_shipping_phone, $shipping_firstname, $shipping_lastname );
-		}
-
-		if ( empty( $revolut_customer_billing_phone ) && ! empty( $revolut_customer_shipping_phone ) ) {
-			$revolut_customer_billing_phone = $revolut_customer_shipping_phone;
-		}
-
-		$wc_billing_address = $this->get_wc_billing_address( $revolut_billing_address, $revolut_customer_email, $revolut_customer_billing_phone, $billing_firstname, $billing_lastname );
-
-		if ( $this->get_posted_integer_data( 'shipping_required' ) ) {
-			$wc_order_data = array_merge( $wc_billing_address, $wc_shipping_address );
-		} else {
-			$wc_order_data = $wc_billing_address;
-		}
-
-		$wc_order_data['ship_to_different_address']    = $this->get_posted_integer_data( 'shipping_required' );
-		$wc_order_data['revolut_pay_express_checkout'] = $this->get_post_request_data( 'revolut_gateway' ) === 'revolut_pay';
-		$wc_order_data['terms']                        = 1;
-		$wc_order_data['order_comments']               = '';
-
-		return $wc_order_data;
-	}
-
-	/**
-	 * Create billing address for order.
-	 *
-	 * @param array  $billing_address Billing address.
-	 * @param string $revolut_customer_email Email.
-	 * @param string $revolut_customer_phone Phone.
-	 * @param string $firstname Firstname.
-	 * @param string $lastname Lastname.
-	 */
-	public function get_wc_billing_address( $billing_address, $revolut_customer_email, $revolut_customer_phone, $firstname, $lastname ) {
-		$address                       = array();
-		$address['billing_first_name'] = $firstname;
-		$address['billing_last_name']  = $lastname;
-
-		$address['billing_email']     = $revolut_customer_email;
-		$address['billing_phone']     = $revolut_customer_phone;
-		$address['billing_country']   = ! empty( $billing_address['country'] ) ? $billing_address['country'] : '';
-		$address['billing_address_1'] = ! empty( $billing_address['addressLine'][0] ) ? $billing_address['addressLine'][0] : '';
-		$address['billing_address_2'] = ! empty( $billing_address['addressLine'][1] ) ? $billing_address['addressLine'][1] : '';
-		$address['billing_city']      = ! empty( $billing_address['city'] ) ? $billing_address['city'] : '';
-		$address['billing_state']     = ! empty( $billing_address['region'] ) ? $this->convert_state_name_to_id( $billing_address['country'], $billing_address['region'] ) : '';
-		$address['billing_postcode']  = ! empty( $billing_address['postalCode'] ) ? $billing_address['postalCode'] : '';
-		$address['billing_company']   = '';
-
-		return $address;
-	}
-
-	/**
-	 * Create billing address for order.
-	 *
-	 * @param array  $shipping_address Shipping address.
-	 * @param string $revolut_customer_email Email.
-	 * @param string $revolut_customer_phone Phone.
-	 * @param string $firstname Firstname.
-	 * @param string $lastname Lastname.
-	 */
-	public function get_wc_shipping_address( $shipping_address, $revolut_customer_email, $revolut_customer_phone, $firstname, $lastname ) {
-		$address['shipping_first_name'] = $firstname;
-		$address['shipping_last_name']  = $lastname;
-		$address['shipping_email']      = $revolut_customer_email;
-		$address['shipping_phone']      = $revolut_customer_phone;
-		$address['shipping_country']    = ! empty( $shipping_address['country'] ) ? $shipping_address['country'] : '';
-		$address['shipping_address_1']  = ! empty( $shipping_address['addressLine'][0] ) ? $shipping_address['addressLine'][0] : '';
-		$address['shipping_address_2']  = ! empty( $shipping_address['addressLine'][1] ) ? $shipping_address['addressLine'][1] : '';
-		$address['shipping_city']       = ! empty( $shipping_address['city'] ) ? $shipping_address['city'] : '';
-		$address['shipping_state']      = ! empty( $shipping_address['region'] ) ? $this->convert_state_name_to_id( $shipping_address['country'], $shipping_address['region'] ) : '';
-		$address['shipping_postcode']   = ! empty( $shipping_address['postalCode'] ) ? $shipping_address['postalCode'] : '';
-		$address['shipping_company']    = '';
-
-		return $address;
-	}
-
-	/**
-	 * Get first and lastname from customer full name string.
-	 *
-	 * @param string $full_name Customer full name.
-	 */
-	public function parse_customer_name( $full_name ) {
-		$full_name_list = explode( ' ', $full_name );
-		if ( count( $full_name_list ) > 1 ) {
-			$lastname  = array_pop( $full_name_list );
-			$firstname = implode( ' ', $full_name_list );
-			return array( $firstname, $lastname );
-		}
-
-		$firstname = $full_name;
-		$lastname  = 'undefined';
-
-		return array( $firstname, $lastname );
+		return $this->format_wc_order_details(
+			$this->get_post_request_data( 'address_info' ),
+			$this->get_posted_integer_data( 'shipping_required' ),
+			$this->get_post_request_data( 'revolut_gateway' )
+		);
 	}
 
 	/**

@@ -17,6 +17,7 @@ jQuery(function ($) {
   let instance = null
   let cardStatus = null
   let wc_order_id = 0
+  let instanceUpsell = null
   let reload_checkout = 0
   const revolut_pay_v2 = $('.revolut-pay-v2').length > 0
 
@@ -285,7 +286,7 @@ jQuery(function ($) {
       error: function (jqXHR, textStatus, errorThrown) {
         if (jqXHR && jqXHR.responseText) {
           let response = jqXHR.responseText.match(/{(.*?)}/)
-          if (response.length > 0 && response[0]) {
+          if (response && response.length > 0) {
             try {
               response = JSON.parse(response[0])
               if (response.result && response.redirect) {
@@ -346,6 +347,10 @@ jQuery(function ($) {
    */
   function handleUpdate() {
     const currentPaymentMethod = getPaymentMethod()
+    $('.payment_method_revolut_pay')
+      .find('label')
+      .addClass('notranslate')
+      .attr('translate', 'no')
 
     if (instance !== null) {
       instance.destroy()
@@ -365,6 +370,24 @@ jQuery(function ($) {
     togglePlaceOrderButton()
 
     if (currentPaymentMethod.methodId === PAYMENT_METHOD.CreditCard) {
+      if ($('#revolut-upsell-banner').length) {
+        if (instanceUpsell != null) {
+          instanceUpsell.destroy()
+        }
+
+        instanceUpsell = RevolutUpsell({
+          locale: currentPaymentMethod.locale,
+          mode: currentPaymentMethod.mode,
+          publicToken: currentPaymentMethod.merchantPublicKey,
+        })
+        instanceUpsell.cardGatewayBanner.mount(
+          document.getElementById('revolut-upsell-banner'),
+          {
+            orderToken: currentPaymentMethod.publicId,
+          },
+        )
+      }
+
       if (
         currentPaymentMethod.widgetType != CARD_WIDGET_TYPES.Popup &&
         !$body.hasClass('woocommerce-order-pay')
@@ -428,6 +451,11 @@ jQuery(function ($) {
           name: address.billing_first_name,
           email: address.billing_email,
           phone: address.billing_phone,
+        },
+        mobileRedirectUrls: {
+          success: currentPaymentMethod.redirectUrl,
+          failure: currentPaymentMethod.redirectUrl,
+          cancel: currentPaymentMethod.redirectUrl,
         },
         __metadata: {
           environment: 'woocommerce',
@@ -665,7 +693,7 @@ jQuery(function ($) {
         error: function (jqXHR, textStatus, errorThrown) {
           if (jqXHR && jqXHR.responseText) {
             let response = jqXHR.responseText.match(/{(.*?)}/)
-            if (response.length > 0 && response[0]) {
+            if (response && response.length > 0) {
               try {
                 response = JSON.parse(response[0])
                 if (response.result) {
@@ -715,7 +743,6 @@ jQuery(function ($) {
     resolve(false)
     displayWooCommerceError('<div class="woocommerce-error">Invalid response</div>')
   }
-
   if (
     $body.hasClass('woocommerce-order-pay') ||
     $body.hasClass('woocommerce-add-payment-method')
@@ -958,26 +985,6 @@ jQuery(function ($) {
     })
   }
 
-  function registerCashbackCandidate(wc_order_id) {
-    return new Promise(function (resolve, reject) {
-      $.ajax({
-        type: 'POST',
-        url: getAjaxURL('register_cashback_candidate'),
-        data: {
-          security: wc_revolut.nonce.register_cashback_candidate,
-          wc_order_id: wc_order_id,
-        },
-
-        success: function (response) {
-          resolve(response)
-        },
-        catch: function (error) {
-          resolve(error)
-        },
-      })
-    })
-  }
-
   /**
    * Show/hide order button based on selected payment method
    */
@@ -1024,7 +1031,7 @@ jQuery(function ($) {
     let shippingTotal = target.dataset.shippingTotal
     let widgetType = target.dataset.widgetType
     let hidePaymentMethod = target.dataset.hidePaymentMethod
-
+    let redirectUrl = target.dataset.redirectUrl
     let savePaymentDetails = 0
     let savePaymentMethodFor = ''
     if (currentPaymentMethod === PAYMENT_METHOD.CreditCard) {
@@ -1051,6 +1058,7 @@ jQuery(function ($) {
       merchantPublicKey: merchantPublicKey,
       shippingTotal: shippingTotal,
       widgetType: widgetType,
+      redirectUrl: redirectUrl,
       hidePaymentMethod: hidePaymentMethod,
     }
   }
@@ -1084,22 +1092,73 @@ jQuery(function ($) {
       }
     }
   })
-
   if (wc_revolut.page === 'order_pay') {
     $(document.body).trigger('wc-credit-card-form-init')
   }
 
-  $(document).on('click', '.revolut-register-cashback-candidate', function () {
-    startProcessing()
-    const wc_order_id = $(this).data('wc-order-id')
-    const self = $(this)
-    registerCashbackCandidate(wc_order_id).then(function (response) {
-      $('.revolut-pay-register-banner-tittle').hide()
-      $('.revolut-pay-register-banner-desc').hide()
-      $('.revolut-pay-register-banner-link').hide()
-      $('.revolut-pay-register-banner-tittle-success').show()
-      self.removeClass('revolut-register-cashback-candidate')
-      stopProcessing()
+  function initPromotionalBanner() {
+    let promotionalBannerElement = document.getElementById('upsellPromotionalBanner')
+
+    if (!promotionalBannerElement) {
+      return null
+    }
+
+    let transactionId = promotionalBannerElement.dataset.bannerTransactionId
+    let currency = promotionalBannerElement.dataset.bannerCurrency
+    let merchantPublicKey = promotionalBannerElement.dataset.bannerMerchantPublicKey
+    let locale = promotionalBannerElement.dataset.locale
+
+    let customer = {
+      email: promotionalBannerElement.dataset.bannerEmail,
+      phone: promotionalBannerElement.dataset.bannerPhone,
+    }
+
+    RevolutUpsell = RevolutUpsell({
+      locale: locale,
+      publicToken: merchantPublicKey,
     })
-  })
+
+    RevolutUpsell.promotionalBanner.mount(promotionalBannerElement, {
+      transactionId: transactionId,
+      currency: currency,
+      customer: customer,
+    })
+  }
+
+  function initEnrollmentConfirmationBanner() {
+    let enrollmentConfirmationBannerElement = document.getElementById(
+      'upsellEnrollmentConfirmationBanner',
+    )
+
+    if (!enrollmentConfirmationBannerElement) {
+      return null
+    }
+
+    let orderPublicId = enrollmentConfirmationBannerElement.dataset.bannerOrderPublicId
+    let merchantPublicKey =
+      enrollmentConfirmationBannerElement.dataset.bannerMerchantPublicKey
+    let locale = enrollmentConfirmationBannerElement.dataset.bannerLocale
+
+    let customer = {
+      email: enrollmentConfirmationBannerElement.dataset.bannerEmail,
+      phone: enrollmentConfirmationBannerElement.dataset.bannerPhone,
+    }
+
+    RevolutUpsell = RevolutUpsell({
+      locale: locale,
+      publicToken: merchantPublicKey,
+    })
+
+    RevolutUpsell.enrollmentConfirmationBanner.mount(
+      enrollmentConfirmationBannerElement,
+      {
+        orderToken: orderPublicId,
+        promotionalBanner: true,
+        customer: customer,
+      },
+    )
+  }
+
+  initPromotionalBanner()
+  initEnrollmentConfirmationBanner()
 })

@@ -455,6 +455,11 @@ jQuery(function ($) {
           size: wc_revolut_payment_request_params.revolut_pay_button_size,
           radius: wc_revolut_payment_request_params.revolut_pay_button_radius,
         },
+        mobileRedirectUrls: {
+          success: wc_revolut_payment_request_params.redirect_url,
+          failure: wc_revolut_payment_request_params.redirect_url,
+          cancel: wc_revolut_payment_request_params.redirect_url,
+        },
         __metadata: {
           environment: 'woocommerce',
           context: wc_revolut_payment_request_params.is_cart_page ? 'cart' : 'product',

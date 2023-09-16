@@ -2,8 +2,8 @@
 Contributors: revolutbusiness
 Tags: revolut, revolut business, revolut pay, payments, gateway, payment gateway, credit card, card
 Requires at least: 4.4
-Tested up to: 6.2
-Stable tag: 4.7.1
+Tested up to: 6.3
+Stable tag: 4.9.0
 Requires PHP: 7.0
 License: GPLv2 or later
 License URI: http://www.apache.org/licenses/LICENSE-2.0
@@ -97,6 +97,13 @@ To start accepting payments from your customers at great rates, install the plug
 5. The Revolut Pay Button settings
 
 == Changelog ==
+= 4.9.0 =
+* Improved Revolut Pay mobile redirects
+* Fixed saving customer ids
+
+= 4.8.0 =
+* Updated promotional banners
+
 = 4.7.1 =
 * Added Cardholder Name input for card gateway
 

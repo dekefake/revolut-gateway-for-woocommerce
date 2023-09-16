@@ -75,9 +75,118 @@ trait WC_Gateway_Revolut_Helper_Trait {
 
 		return $json['public_id'];
 	}
+	/**
+	 * Retrieve the revolut customer's id.
+	 *
+	 * @param  string $billing_email holds customer billing phone.
+	 * @param  string $billing_phone holds customer email address.
+	 * @throws Exception Exception.
+	 */
+	public function get_or_create_revolut_customer( $billing_email = '', $billing_phone = '' ) {
+		if ( empty( $billing_email ) || empty( $billing_phone ) ) {
+			$wc_customer   = WC()->customer;
+			$billing_email = $wc_customer->get_billing_email();
+			$billing_phone = $wc_customer->get_billing_phone();
+		}
+
+		if ( empty( $billing_email ) || empty( $billing_phone ) ) {
+			return;
+		}
+
+		$revolut_customer_id = $this->get_revolut_customer_id();
+
+		if ( empty( $revolut_customer_id ) ) {
+			$revolut_customer_id = $this->create_revolut_customer( $billing_phone, $billing_email );
+			return $revolut_customer_id;
+		}
+
+		return $revolut_customer_id;
+	}
 
 	/**
-	 * Update Revolut Order
+	 * Update the revolut customer's phone.
+	 *
+	 * @param string $revolut_customer_id customer_id.
+	 * @param string $billing_phone billing phone number.
+	 * @throws Exception Exception.
+	 * @return void|null
+	 */
+	public function update_revolut_customer( $revolut_customer_id, $billing_phone ) {
+		if ( empty( $revolut_customer_id ) || empty( $billing_phone ) ) {
+			return null;
+		}
+
+		$this->api_client->patch( "/customers/$revolut_customer_id", array( 'phone' => $billing_phone ) );
+	}
+
+	/**
+	 * Create revolut customer.
+	 *
+	 * @return $revolut_customer_id revolut customer id.
+	 * @param  string $billing_phone holds customer billing phone.
+	 * @param  string $billing_email holds customer email address.
+	 * @throws Exception Exception.
+	 */
+	public function create_revolut_customer( $billing_phone, $billing_email ) {
+		try {
+			if ( empty( $billing_phone ) || empty( $billing_email ) ) {
+				return;
+			}
+
+			$revolut_customer_id = null;
+
+			$body = array(
+				'phone' => $billing_phone,
+				'email' => $billing_email,
+			);
+
+			$revolut_customer    = $this->api_client->get( '/customers?term=' . $billing_email );
+			$revolut_customer_id = ! empty( $revolut_customer[0]['id'] ) ? $revolut_customer[0]['id'] : '';
+
+			if ( ! $revolut_customer_id ) {
+				$revolut_customer    = $this->api_client->post( '/customers', $body );
+				$revolut_customer_id = ! empty( $revolut_customer['id'] ) ? $revolut_customer['id'] : '';
+			}
+
+			if ( ! $revolut_customer_id ) {
+				return $revolut_customer_id;
+			}
+
+			$this->insert_revolut_customer_id( $revolut_customer_id );
+
+			$this->update_revolut_customer( $revolut_customer_id, $billing_phone );
+			return $revolut_customer_id;
+		} catch ( Exception $e ) {
+			$this->log_error( 'create_revolut_customer: ' . $e->getMessage() );
+		}
+	}
+
+	/**
+	 * Save Revolut customer id.
+	 *
+	 * @param string $revolut_customer_id Revolut customer id.
+	 *
+	 * @throws Exception Exception.
+	 */
+	protected function insert_revolut_customer_id( $revolut_customer_id ) {
+		if ( empty( get_current_user_id() ) ) {
+			return;
+		}
+
+		global $wpdb;
+		$revolut_customer_id = "{$this->api_client->mode}_$revolut_customer_id";
+
+		$wpdb->query(
+			$wpdb->prepare(
+				"INSERT INTO {$wpdb->prefix}wc_revolut_customer (wc_customer_id, revolut_customer_id) 
+				 VALUES (%d, %s) ON DUPLICATE KEY UPDATE wc_customer_id = VALUES(wc_customer_id)",
+				array( get_current_user_id(), $revolut_customer_id )
+			)
+		); // db call ok; no-cache ok.
+	}
+
+	/**
+	 * Update Revolut Order.
 	 *
 	 * @param WC_Revolut_Order_Descriptor $order_descriptor Revolut Order Descriptor.
 	 * @param String                      $public_id Revolut public id.
@@ -126,8 +235,12 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 * @return void.
 	 */
 	public function convert_revolut_order_metadata_into_wc_session( $id_revolut_order ) {
+		WC()->initialize_session();
+		WC()->initialize_cart();
+
 		global $wpdb;
 		$temp_session = $wpdb->get_row( $wpdb->prepare( 'SELECT temp_session FROM ' . $wpdb->prefix . 'wc_revolut_temp_session WHERE order_id=%s', array( $id_revolut_order ) ), ARRAY_A ); // db call ok; no-cache ok.
+
 		$this->log_info( 'start convert_revolut_order_metadata_into_wc_session temp_session:' );
 		$this->log_info( $temp_session['temp_session'] );
 
@@ -144,6 +257,159 @@ trait WC_Gateway_Revolut_Helper_Trait {
 		WC()->session->set( 'coupon_discount_totals', $wc_order_metadata['coupon_discount_totals'] );
 		WC()->session->set( 'coupon_discount_tax_totals', $wc_order_metadata['coupon_discount_tax_totals'] );
 		WC()->session->set( 'get_removed_cart_contents', $wc_order_metadata['get_removed_cart_contents'] );
+
+		$session = new WC_Cart_Session( WC()->cart );
+		$session->get_cart_from_session();
+	}
+
+	/**
+	 * Get order details
+	 *
+	 * @param array  $address Customer address.
+	 * @param bool   $shipping_required is shipping option required for the current order.
+	 * @param string $gateway selected payment gateway.
+	 * @throws Exception Exception.
+	 */
+	public function format_wc_order_details( $address, $shipping_required, $gateway ) {
+		if ( empty( $address['billingAddress'] ) ) {
+			throw new Exception( 'Billing address is missing' );
+		}
+
+		if ( $shipping_required && empty( $address['shippingAddress'] ) ) {
+			throw new Exception( 'Shipping address is missing' );
+		}
+
+		if ( empty( $address['email'] ) ) {
+			throw new Exception( 'User Email information is missing' );
+		}
+
+		$revolut_billing_address         = $address['billingAddress'];
+		$revolut_customer_email          = $address['email'];
+		$revolut_customer_full_name      = ! empty( $revolut_billing_address['recipient'] ) ? $revolut_billing_address['recipient'] : '';
+		$revolut_customer_billing_phone  = ! empty( $revolut_billing_address['phone'] ) ? $revolut_billing_address['phone'] : '';
+		$revolut_customer_shipping_phone = '';
+		$wc_shipping_address             = array();
+
+		list($billing_firstname, $billing_lastname) = $this->parse_customer_name( $revolut_customer_full_name );
+
+		if ( isset( $address['shippingAddress'] ) && ! empty( $address['shippingAddress'] ) ) {
+			$revolut_shipping_address            = $address['shippingAddress'];
+			$revolut_customer_shipping_phone     = ! empty( $revolut_shipping_address['phone'] ) ? $revolut_shipping_address['phone'] : '';
+			$revolut_customer_shipping_full_name = ! empty( $revolut_shipping_address['recipient'] ) ? $revolut_shipping_address['recipient'] : '';
+
+			$shipping_firstname = $billing_firstname;
+			$shipping_lastname  = $billing_lastname;
+
+			if ( ! empty( $revolut_customer_shipping_full_name ) ) {
+				list($shipping_firstname, $shipping_lastname) = $this->parse_customer_name( $revolut_customer_shipping_full_name );
+			}
+
+			if ( empty( $revolut_customer_shipping_phone ) && ! empty( $revolut_customer_billing_phone ) ) {
+				$revolut_customer_shipping_phone = $revolut_customer_billing_phone;
+			}
+
+			$wc_shipping_address = $this->get_wc_shipping_address( $revolut_shipping_address, $revolut_customer_email, $revolut_customer_shipping_phone, $shipping_firstname, $shipping_lastname );
+		}
+
+		if ( empty( $revolut_customer_billing_phone ) && ! empty( $revolut_customer_shipping_phone ) ) {
+			$revolut_customer_billing_phone = $revolut_customer_shipping_phone;
+		}
+
+		$wc_billing_address = $this->get_wc_billing_address( $revolut_billing_address, $revolut_customer_email, $revolut_customer_billing_phone, $billing_firstname, $billing_lastname );
+
+		if ( $shipping_required ) {
+			$wc_order_data = array_merge( $wc_billing_address, $wc_shipping_address );
+		} else {
+			$wc_order_data = $wc_billing_address;
+		}
+
+		$wc_order_data['ship_to_different_address']    = $shipping_required;
+		$wc_order_data['revolut_pay_express_checkout'] = 'revolut_pay' === $gateway;
+		$wc_order_data['terms']                        = 1;
+		$wc_order_data['order_comments']               = '';
+
+		return $wc_order_data;
+	}
+
+	/**
+	 * Get first and lastname from customer full name string.
+	 *
+	 * @param string $full_name Customer full name.
+	 */
+	public function parse_customer_name( $full_name ) {
+		$full_name_list = explode( ' ', $full_name );
+		if ( count( $full_name_list ) > 1 ) {
+			$lastname  = array_pop( $full_name_list );
+			$firstname = implode( ' ', $full_name_list );
+			return array( $firstname, $lastname );
+		}
+
+		$firstname = $full_name;
+		$lastname  = 'undefined';
+
+		return array( $firstname, $lastname );
+	}
+
+	/**
+	 * Create billing address for order.
+	 *
+	 * @param array  $shipping_address Shipping address.
+	 * @param string $revolut_customer_email Email.
+	 * @param string $revolut_customer_phone Phone.
+	 * @param string $firstname Firstname.
+	 * @param string $lastname Lastname.
+	 */
+	public function get_wc_shipping_address( $shipping_address, $revolut_customer_email, $revolut_customer_phone, $firstname, $lastname ) {
+		$address['shipping_first_name'] = $firstname;
+		$address['shipping_last_name']  = $lastname;
+		$address['shipping_email']      = $revolut_customer_email;
+		$address['shipping_phone']      = $revolut_customer_phone;
+		$address['shipping_country']    = ! empty( $shipping_address['country'] ) ? $shipping_address['country'] : '';
+		$address['shipping_address_1']  = ! empty( $shipping_address['addressLine'][0] ) ? $shipping_address['addressLine'][0] : '';
+		$address['shipping_address_2']  = ! empty( $shipping_address['addressLine'][1] ) ? $shipping_address['addressLine'][1] : '';
+		$address['shipping_city']       = ! empty( $shipping_address['city'] ) ? $shipping_address['city'] : '';
+		$address['shipping_state']      = ! empty( $shipping_address['region'] ) ? $this->convert_state_name_to_id( $shipping_address['country'], $shipping_address['region'] ) : '';
+		$address['shipping_postcode']   = ! empty( $shipping_address['postalCode'] ) ? $shipping_address['postalCode'] : '';
+		$address['shipping_company']    = '';
+
+		return $address;
+	}
+
+	/**
+	 * Create billing address for order.
+	 *
+	 * @param array  $billing_address Billing address.
+	 * @param string $revolut_customer_email Email.
+	 * @param string $revolut_customer_phone Phone.
+	 * @param string $firstname Firstname.
+	 * @param string $lastname Lastname.
+	 */
+	public function get_wc_billing_address( $billing_address, $revolut_customer_email, $revolut_customer_phone, $firstname, $lastname ) {
+		$address                       = array();
+		$address['billing_first_name'] = $firstname;
+		$address['billing_last_name']  = $lastname;
+
+		$address['billing_email']     = $revolut_customer_email;
+		$address['billing_phone']     = $revolut_customer_phone;
+		$address['billing_country']   = ! empty( $billing_address['country'] ) ? $billing_address['country'] : '';
+		$address['billing_address_1'] = ! empty( $billing_address['addressLine'][0] ) ? $billing_address['addressLine'][0] : '';
+		$address['billing_address_2'] = ! empty( $billing_address['addressLine'][1] ) ? $billing_address['addressLine'][1] : '';
+		$address['billing_city']      = ! empty( $billing_address['city'] ) ? $billing_address['city'] : '';
+		$address['billing_state']     = ! empty( $billing_address['region'] ) ? $this->convert_state_name_to_id( $billing_address['country'], $billing_address['region'] ) : '';
+		$address['billing_postcode']  = ! empty( $billing_address['postalCode'] ) ? $billing_address['postalCode'] : '';
+		$address['billing_company']   = '';
+
+		return $address;
+	}
+
+	/**
+	 * Check if payment is pending.
+	 *
+	 * @param string $revolut_order_id Revolut order id.
+	 */
+	protected function is_pending_payment( $revolut_order_id ) {
+		$revolut_order = $this->api_client->get( '/orders/' . $revolut_order_id );
+		return ! isset( $revolut_order['state'] ) || ( isset( $revolut_order['state'] ) && 'PENDING' === $revolut_order['state'] );
 	}
 
 	/**
@@ -194,6 +460,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 		global $wpdb;
 		$revolut_customer_id = $wpdb->get_col( $wpdb->prepare( 'SELECT revolut_customer_id FROM ' . $wpdb->prefix . 'wc_revolut_customer WHERE wc_customer_id=%s', array( $wc_customer_id ) ) ); // db call ok; no-cache ok.
 		$revolut_customer_id = reset( $revolut_customer_id );
+
 		if ( empty( $revolut_customer_id ) ) {
 			$revolut_customer_id = null;
 		}
@@ -204,13 +471,35 @@ trait WC_Gateway_Revolut_Helper_Trait {
 			list( $api_mode, $revolut_customer_id ) = $revolut_customer_id_with_mode;
 
 			if ( $api_mode !== $this->api_client->mode ) {
+				$this->delete_customer_record( $wc_customer_id );
 				return null;
 			}
+		}
 
-			return $revolut_customer_id;
+		// verify customer id through api.
+		$revolut_customer = $this->api_client->get( '/customers/' . $revolut_customer_id );
+
+		if ( empty( $revolut_customer['id'] ) ) {
+			$this->delete_customer_record( $wc_customer_id );
+			return null;
 		}
 
 		return $revolut_customer_id;
+	}
+
+	/**
+	 * Remove customer db record
+	 *
+	 * @param string $wc_customer_id customer id.
+	 */
+	public function delete_customer_record( $wc_customer_id ) {
+		global $wpdb;
+		$wpdb->delete( // phpcs:ignore
+			$wpdb->prefix . 'wc_revolut_customer',
+			array(
+				'wc_customer_id' => $wc_customer_id,
+			)
+		);
 	}
 
 	/**
@@ -620,67 +909,5 @@ trait WC_Gateway_Revolut_Helper_Trait {
 		}
 
 		return in_array( $order_status, $selected_capture_status_list, true );
-	}
-
-	/**
-	 * Check order contains cashback offer
-	 *
-	 * @param String $revolut_order_id order id.
-	 */
-	public function check_is_order_has_cashback_offer( $revolut_order_id ) {
-		if ( empty( $revolut_order_id ) ) {
-			return false;
-		}
-
-		$revolut_order = $this->api_client->get( '/orders/' . $revolut_order_id );
-
-		if ( ! isset( $revolut_order['payments'] ) || empty( $revolut_order['payments'][0] ) || empty( $revolut_order['payments'][0]['token'] ) ) {
-			return false;
-		}
-
-		$payment_token  = $revolut_order['payments'][0]['token'];
-		$cashback_offer = $this->api_client->public_request( '/cashback', array( 'Revolut-Payment-Token' => $payment_token ), 'GET' );
-
-		if ( ! empty( $cashback_offer ) && isset( $cashback_offer['value'] )
-			&& ! empty( $cashback_offer['value']['currency'] )
-			&& ! empty( $cashback_offer['value']['amount'] )
-		) {
-			$cashback_currency = $cashback_offer['value']['currency'];
-			$cashback_amount   = $this->get_wc_order_total( $cashback_offer['value']['amount'], $cashback_currency );
-
-			return array(
-				'payment_token'     => $payment_token,
-				'cashback_currency' => $cashback_currency,
-				'cashback_amount'   => $cashback_amount,
-			);
-		}
-
-		return false;
-	}
-
-	/**
-	 * Register a cashback candidate
-	 *
-	 * @param String $payment_token order id.
-	 * @param String $billing_phone customer billing phone.
-	 *
-	 * @return mixed
-	 * @throws Exception Exception.
-	 */
-	public function register_cashback_candidate( $payment_token, $billing_phone ) {
-		if ( empty( $payment_token ) || empty( $billing_phone ) ) {
-			return false;
-		}
-
-		$this->api_client->public_request(
-			'/cashback',
-			array( 'Revolut-Payment-Token' => $payment_token ),
-			'POST',
-			array(
-				'phone'             => $billing_phone,
-				'marketing_consent' => true,
-			)
-		);
-
 	}
 }

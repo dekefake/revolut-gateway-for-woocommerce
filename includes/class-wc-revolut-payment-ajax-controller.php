@@ -38,7 +38,6 @@ class WC_Revolut_Payment_Ajax_Controller {
 		add_action( 'wc_ajax_wc_revolut_get_order_pay_billing_info', array( $this, 'wc_revolut_get_order_pay_billing_info' ) );
 		add_action( 'wc_ajax_wc_revolut_get_customer_info', array( $this, 'wc_revolut_get_customer_info' ) );
 		add_action( 'wc_ajax_wc_revolut_process_payment_result', array( $this, 'wc_revolut_process_payment_result' ) );
-		add_action( 'wc_ajax_wc_revolut_register_cashback_candidate', array( $this, 'wc_revolut_register_cashback_candidate' ) );
 		add_action( 'wc_ajax_revolut_payment_request_cancel_order', array( $this, 'revolut_payment_request_ajax_cancel_order' ) );
 		add_action( 'wc_ajax_revolut_payment_request_set_error_message', array( $this, 'revolut_payment_request_ajax_set_error_message' ) );
 		add_action( 'wc_ajax_revolut_payment_request_log_error', array( $this, 'revolut_payment_request_ajax_log_error' ) );
@@ -310,8 +309,6 @@ class WC_Revolut_Payment_Ajax_Controller {
 
 			$validate_checkout->return_ajax_failure_response();
 		} catch ( Exception $e ) {
-			$this->log_error( 'wc_revolut_register_cashback_candidate: ' . $e );
-
 			wc_add_notice( $e->getMessage(), 'error' );
 			$messages = wc_print_notices( true );
 			$response = array(
@@ -470,45 +467,5 @@ class WC_Revolut_Payment_Ajax_Controller {
 	public function revolut_payment_request_ajax_log_error() {
 		$error_message = $this->get_post_request_data( 'revolut_payment_request_error' );
 		$this->log_error( $error_message );
-	}
-
-	/**
-	 * Register a cashback candidate
-	 *
-	 * @throws Exception Exception.
-	 */
-	public function wc_revolut_register_cashback_candidate() {
-		try {
-			check_ajax_referer( 'wc-revolut-register-cashback-candidate', 'security' );
-			$wc_order_id = $this->get_post_request_data( 'wc_order_id' );
-			if ( empty( $wc_order_id ) ) {
-				throw new Exception( __( 'Empty wc_order_id parameter' ) );
-			}
-
-			$wc_order = wc_get_order( $wc_order_id );
-
-			if ( empty( $wc_order->get_id() ) ) {
-				throw new Exception( __( 'Can not find wc order' ) );
-			}
-
-			$payment_token_id = $wc_order->get_meta( 'revolut_payment_token', true );
-
-			if ( empty( $payment_token_id ) ) {
-				throw new Exception( __( 'Can not find payment_token_id' ) );
-			}
-
-			$billing_phone = $wc_order->get_billing_phone();
-
-			if ( empty( $billing_phone ) ) {
-				throw new Exception( __( 'Can not find billing_phone' ) );
-			}
-
-			$this->register_cashback_candidate( $payment_token_id, $billing_phone );
-			update_post_meta( $wc_order_id, 'cashback_registered', true );
-			wp_send_json( array( 'success' => true ) );
-		} catch ( Exception $e ) {
-			wp_send_json( array( 'success' => false ) );
-			$this->log_error( 'wc_revolut_register_cashback_candidate: ' . $e );
-		}
 	}
 }
