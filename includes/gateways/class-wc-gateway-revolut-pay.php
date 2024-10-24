@@ -43,28 +43,32 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 			$this->init_scripts();
 		}
 
-		add_action( 'wp_loaded', array( $this, 'check_revolut_pay_payment_result' ) );
+		add_action( 'wp', array( $this, 'check_revolut_pay_payment_result' ) );
 		add_filter( 'wc_revolut_settings_nav_tabs', array( $this, 'admin_nav_tab' ), 3 );
 		add_action( 'wp_enqueue_scripts', array( $this, 'wc_revolut_pay_enqueue_scripts' ) );
 		add_action( 'woocommerce_after_add_to_cart_quantity', array( $this, 'display_payment_request_button_html' ), 1 );
 		add_action( 'woocommerce_proceed_to_checkout', array( $this, 'display_payment_request_button_html' ), 1 );
 		add_action( 'wc_ajax_revolut_payment_request_load_order_data', array( $this, 'revolut_payment_request_ajax_load_order_data' ) );
-		add_action( 'wc_ajax_revolut_payment_request_get_express_checkout_params', array( $this, 'revolut_payment_request_ajax_get_express_checkout_params' ) );
+		add_filter( 'woocommerce_gateway_title', array( $this, 'custom_revolut_pay_label' ), 10, 2 );
 	}
 
 	/**
 	 * Get express checkout params
 	 */
 	public function check_revolut_pay_payment_result() {
-		if ( empty( $this->get_request_data( '_rp_oid' ) ) ) {
+		if ( empty( get_query_var( '_rp_oid' ) ) ) {
 			return;
 		}
 
-		$public_id = $this->get_request_data( '_rp_oid' );
+		$public_id = get_query_var( '_rp_oid' );
 
 		global $wpdb;
 		$wc_order_id      = $wpdb->get_row( $wpdb->prepare( 'SELECT wc_order_id, HEX(order_id) as order_id FROM ' . $wpdb->prefix . "wc_revolut_orders WHERE public_id=UNHEX(REPLACE(%s, '-', ''))", array( $public_id ) ), ARRAY_A ); // db call ok; no-cache ok.
 		$revolut_order_id = $this->uuid_dashes( $wc_order_id['order_id'] );
+
+		if ( ! empty( $wc_order_id ) && empty( $wc_order_id['wc_order_id'] ) && $this->is_order_payment_page() ) {
+			$wc_order_id['wc_order_id'] = $this->wc_revolut_get_current_order_id();
+		}
 
 		if ( empty( $revolut_order_id ) || $this->is_pending_payment( $revolut_order_id ) ) {
 			return;
@@ -94,9 +98,7 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 
 		$this->log_error( 'order processing - public_id: ' . $public_id . ' - wc_order_id: ' . $wc_order_id );
 
-		$_POST['revolut_public_id']      = $public_id;
-		$_POST['revolut_pay_redirected'] = 1;
-		$this->process_payment( $wc_order_id );
+		$this->process_payment( $wc_order_id, $public_id, false, '', false, true );
 	}
 
 	/**
@@ -107,8 +109,8 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 	 */
 	public function process_revolut_pay_fc_payment( $revolut_public_id ) {
 		try {
-			if ( ! empty( $this->get_request_data( '_rp_fr' ) ) ) {
-				wc_add_notice( $this->get_request_data( '_rp_fr' ), 'error' );
+			if ( ! empty( get_query_var( '_rp_fr' ) ) ) {
+				wc_add_notice( get_query_var( '_rp_fr' ), 'error' );
 				return;
 			}
 
@@ -157,26 +159,6 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 	}
 
 	/**
-	 * Get express checkout params
-	 */
-	public function revolut_payment_request_ajax_get_express_checkout_params() {
-		check_ajax_referer( 'wc-revolut-get-express-checkout-params', 'security' );
-
-		try {
-			wp_send_json(
-				array(
-					'success'           => true,
-					'revolut_public_id' => $this->create_express_checkout_public_id(),
-					'checkout_nonce'    => wp_create_nonce( 'woocommerce-process_checkout' ),
-				)
-			);
-		} catch ( Exception $e ) {
-			wp_send_json( array( 'success' => false ) );
-			$this->log_error( $e );
-		}
-	}
-
-	/**
 	 * Load express checkout information from api
 	 */
 	public function activate_default_express_checkout() {
@@ -199,19 +181,16 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 		try {
 			$order_id = $this->get_revolut_order_by_public_id( $revolut_public_id );
 
-			$revolut_order = $this->api_client->get( "/orders/{$order_id }" );
+			$revolut_order = $this->api_client->get( "/orders/{$order_id}" );
 
-			$customer_id      = $revolut_order['customer_id'];
 			$shipping_address = $revolut_order['shipping_address'];
-			$customer         = $this->api_client->get( '/customers/' . $customer_id );
 
 			$this->log_info( 'load_order_data' );
-			$this->log_info( $customer );
 			$this->log_info( $shipping_address );
 
-			$address_info['fullname'] = ! empty( $customer['full_name'] ) ? $customer['full_name'] : '';
-			$address_info['email']    = ! empty( $customer['email'] ) ? $customer['email'] : '';
-			$address_info['phone']    = ! empty( $customer['phone'] ) ? $customer['phone'] : '';
+			$address_info['fullname'] = ! empty( $revolut_order['full_name'] ) ? $revolut_order['full_name'] : '';
+			$address_info['email']    = ! empty( $revolut_order['email'] ) ? $revolut_order['email'] : '';
+			$address_info['phone']    = ! empty( $revolut_order['phone'] ) ? $revolut_order['phone'] : '';
 
 			$shipping_address['recipient'] = $address_info['fullname'];
 			$shipping_address['phone']     = $address_info['phone'];
@@ -244,7 +223,7 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 		try {
 			check_ajax_referer( 'wc-revolut-load-order-data', 'security' );
 
-			$revolut_public_id = $this->get_post_request_data( 'revolut_public_id' );
+			$revolut_public_id = isset( $_POST['revolut_public_id'] ) ? wc_clean( wp_unslash( $_POST['revolut_public_id'] ) ) : '';
 
 			wp_send_json(
 				$this->load_order_data( $revolut_public_id )
@@ -260,24 +239,22 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 	 * Display payment request button html
 	 */
 	public function display_payment_request_button_html() {
-		if ( ! $this->page_supports_payment_request_button( $this->get_option( 'revolut_pay_button_locations' ) ) || ! $this->is_shipping_required() ) {
+		if ( 'yes' !== $this->enabled || ! $this->page_supports_payment_request_button( $this->get_option( 'revolut_pay_button_locations' ) ) || ! $this->is_shipping_required() ) {
 			return false;
-		}
-
-		if ( ! $this->is_revolut_payment_request_gateway_active() ) {
-			?>
-			<div class="wc-revolut-pay-express-checkout-instance" id="wc-revolut-pay-express-checkout-container" style="clear:both;padding-top:1.5em;">
-				<div id="revolut-pay-express-checkout-button"></div>
-				<p id="wc-revolut-pay-express-checkout-button-separator" style="text-align:center;margin-bottom:1.5em;">&mdash;&nbsp;<?php echo esc_html( __( 'OR', 'revolut-gateway-for-woocommerce' ) ); ?>
-					&nbsp;&mdash;</p>
-			</div>
-			<?php
-			return;
 		}
 
 		?>
 		<div class="wc-revolut-pay-express-checkout-instance" id="wc-revolut-pay-express-checkout-container" style="clear:both;padding-top:1.5em;">
+			<?php if ( $this->promotional_settings->revpoints_banner_enabled() ) : ?>
+				<div id="revolut-pay-informational-banner"></div>
+			<?php endif; ?>
+
 			<div id="revolut-pay-express-checkout-button"></div>
+			<?php if ( ! $this->is_revolut_payment_request_gateway_active() ) : ?>
+				<p id="wc-revolut-pay-express-checkout-button-separator" style="text-align:center;margin-bottom:1.5em;">
+					&mdash;&nbsp;<?php echo esc_html( __( 'OR', 'revolut-gateway-for-woocommerce' ) ); ?>&nbsp;&mdash;
+				</p>
+			<?php endif; ?>
 		</div>
 		<?php
 	}
@@ -297,7 +274,7 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 			)
 		);
 
-		if ( ! $this->page_supports_payment_request_button( $this->get_option( 'revolut_pay_button_locations' ) ) || ! $this->is_shipping_required() ) {
+		if ( 'yes' !== $this->enabled || ! $this->page_supports_payment_request_button( $this->get_option( 'revolut_pay_button_locations' ) ) || ! $this->is_shipping_required() ) {
 			return false;
 		}
 
@@ -415,15 +392,42 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 		);
 	}
 
+
+	/**
+	 * Check is payment method available.
+	 */
+	public function is_available() {
+		if ( ! $this->check_currency_support() ||
+			! $this->is_payment_method_available( 'pay_with_revolut' ) ) {
+			return false;
+		}
+
+		return 'yes' === $this->enabled;
+	}
+
 	/**
 	 * Display Revolut Pay icon
 	 */
 	public function get_icon() {
-		$icons_str = '';
+		$icons_str = '<div class="revolut-pay-label-icons">';
 
-		$icons_str .= '<img src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/visa.svg" style="margin-left:2px" alt="Visa" />';
-		$icons_str .= '<img src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/mastercard.svg" style="margin-left:2px" alt="MasterCard" />';
+		$available_card_brands = array();
+
+		if ( WC()->cart ) {
+			$total                 = WC()->cart->get_total( '' );
+			$currency              = get_woocommerce_currency();
+			$total                 = $this->get_revolut_order_total( $total, $currency );
+			$available_card_brands = $this->get_available_card_brands( $total, $currency );
+		}
+
+		if ( in_array( 'amex', $available_card_brands, true ) ) {
+			$icons_str .= '<img class="revolut-card-gateway-icon-amex" src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/amex.svg" style="margin-left:2px" alt="Amex" />';
+		}
+
+		$icons_str .= '<img class="revolut-card-gateway-icon-visa" src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/visa.svg" style="margin-left:2px" alt="Visa" />';
+		$icons_str .= '<img class="revolut-card-gateway-icon-mastercard" src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/mastercard.svg" style="margin-left:2px" alt="MasterCard" />';
 		$icons_str .= '<img class="rev-pay-v2" src="' . WC_REVOLUT_PLUGIN_URL . '/assets/images/revolut.svg" alt="Revolut Pay" />';
+		$icons_str .= '</div>';
 
 		return apply_filters( 'woocommerce_gateway_icon', $icons_str, $this->id );
 	}
@@ -440,7 +444,7 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 	public function generate_inline_revolut_form( $public_id, $merchant_public_key, $display_tokenization ) {
 		$total = WC()->cart->get_total( '' );
 
-		if ( $this->check_is_get_data_submitted( 'pay_for_order' ) && ! empty( $this->get_request_data( 'key' ) ) ) {
+		if ( get_query_var( 'pay_for_order' ) && ! empty( get_query_var( 'key' ) ) ) {
 			global $wp;
 			$order = wc_get_order( wc_clean( $wp->query_vars['order-pay'] ) );
 			$total = $order->get_total();
@@ -450,7 +454,7 @@ class WC_Gateway_Revolut_Pay extends WC_Payment_Gateway_Revolut {
 		$total                          = $this->get_revolut_order_total( $total, $currency );
 		$mode                           = $this->api_settings->get_option( 'mode' );
 		$shipping_total                 = $this->get_cart_total_shipping();
-		$mobile_redirect_url            = wc_get_checkout_url();
+		$mobile_redirect_url            = $this->is_order_payment_page() ? $this->wc_revolut_get_checkout_payment_url() : wc_get_checkout_url();
 		$revolut_pay_v2_class_indicator = '';
 
 		if ( ! empty( $merchant_public_key ) ) {

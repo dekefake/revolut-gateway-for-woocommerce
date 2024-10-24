@@ -157,11 +157,11 @@ msgid "Revolut Order Data Erased."
 msgstr ""
 
 #: includes/gateways/class-wc-gateway-revolut-cc.php:23
-msgid "Revolut Gateway - Credit Cards"
+msgid "Revolut Gateway - Credit/Debit Cards"
 msgstr ""
 
 #: includes/gateways/class-wc-gateway-revolut-cc.php:24
-msgid "Credit Cards"
+msgid "Credit/Debit Cards"
 msgstr ""
 
 #: includes/gateways/class-wc-gateway-revolut-cc.php:26

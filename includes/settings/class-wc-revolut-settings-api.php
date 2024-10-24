@@ -19,6 +19,27 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	use WC_Revolut_Settings_Trait;
 
 	/**
+	 * Webhook endpoint path
+	 *
+	 * @var string
+	 */
+	public static $webhook_endpoint = '/wp-json/wc/v3/revolut';
+
+	/**
+	 * New webhook endpoint path
+	 *
+	 * @var string
+	 */
+	public static $webhook_endpoint_new = '/wp-json/wc/v3/revolut/webhook';
+
+	/**
+	 * New address validation webhook endpoint path
+	 *
+	 * @var string
+	 */
+	public static $address_validation_webhook_endpoint_new = '/wp-json/wc/v3/revolut/address/validation/webhook';
+
+	/**
 	 * Constructor
 	 */
 	public function __construct() {
@@ -139,13 +160,6 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 				'custom_attributes' => array(
 					'data-placeholder' => __( 'Select status', 'revolut-gateway-for-woocommerce' ),
 				),
-			),
-			'disable_banner'               => array(
-				'title'       => 'Banner Visibility',
-				'label'       => __( 'Customers can get instructions to signup to Revolut and get rewarded.', 'revolut-gateway-for-woocommerce' ),
-				'type'        => 'checkbox',
-				'description' => 'This will allow them to pay via Revolut Pay the next time they visit your store and checkout faster.',
-				'default'     => 'yes',
 			),
 		);
 	}
@@ -291,13 +305,52 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	}
 
 	/**
+	 * Revolut location setup
+	 *
+	 * @throws Exception Exception.
+	 */
+	public function setup_revolut_location() {
+		$domain        = get_site_url();
+		$location_name = str_replace( array( 'https://', 'http://' ), '', $domain );
+		$api_client    = new WC_Revolut_API_Client( $this, true );
+		$locations     = $api_client->get( '/locations' );
+
+		if ( ! empty( $locations ) ) {
+			foreach ( $locations as $location ) {
+				if ( isset( $location['name'] ) && $location['name'] === $domain && ! empty( $location['id'] ) ) {
+					return $location['id'];
+				}
+			}
+		}
+
+		$body = array(
+			'name'    => $location_name,
+			'type'    => 'online',
+			'details' => array(
+				'domain' => $domain,
+			),
+		);
+
+		$location = $api_client->post( '/locations', $body );
+
+		if ( ! isset( $location['id'] ) || empty( $location['id'] ) ) {
+			throw new Exception( 'Can not create location object.' );
+		}
+
+		return $location['id'];
+	}
+
+	/**
 	 * Check is shop needs webhook setup
 	 */
 	public function check_is_shop_needs_webhook_setup() {
 		try {
-			$web_hook_url = get_site_url( null, '/wp-json/wc/v3/revolut', 'https' );
+			$mode = $this->get_option( 'mode' );
+			$mode = empty( $mode ) ? 'sandbox' : $mode;
 
-			if ( $this->get_option( 'revolut_webhook_domain' ) === $web_hook_url ) {
+			$web_hook_url = get_site_url( null, self::$webhook_endpoint_new . '/' . $mode, 'https' );
+
+			if ( $this->get_option( $mode . '_revolut_webhook_domain' ) === $web_hook_url ) {
 				return false;
 			}
 
@@ -319,23 +372,48 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	}
 
 	/**
+	 * Remove old webhook setup
+	 */
+	public function remove_old_revolut_webhook_if_exist() {
+		$old_web_hook_url  = get_site_url( null, self::$webhook_endpoint, 'https' );
+		$api_client        = new WC_Revolut_API_Client( $this );
+		$web_hook_url_list = $api_client->get( '/webhooks' );
+
+		if ( ! empty( $web_hook_url_list ) ) {
+			foreach ( $web_hook_url_list as $key => $value ) {
+				if ( $value['url'] === $old_web_hook_url ) {
+					$api_client->delete( '/webhooks/' . $value['id'] );
+				}
+			}
+		}
+	}
+
+	/**
 	 * Revolut webhook setup
 	 */
 	public function setup_revolut_webhook() {
 		try {
-			$web_hook_url = get_site_url( null, '/wp-json/wc/v3/revolut', 'https' );
-			$body         = array(
+			$mode = $this->get_option( 'mode' );
+			$mode = empty( $mode ) ? 'sandbox' : $mode;
+
+			$web_hook_url = get_site_url( null, self::$webhook_endpoint_new . '/' . $mode, 'https' );
+
+			$body = array(
 				'url'    => $web_hook_url,
 				'events' => array(
 					'ORDER_COMPLETED',
 					'ORDER_AUTHORISED',
 				),
 			);
-			$api_client   = new WC_Revolut_API_Client( $this );
-			$response     = $api_client->post( '/webhooks', $body );
 
-			if ( isset( $response['id'] ) && ! empty( $response['id'] ) ) {
-				$this->update_option( 'revolut_webhook_domain', $web_hook_url );
+			$api_client = new WC_Revolut_API_Client( $this );
+			$response   = $api_client->post( '/webhooks', $body );
+
+			if ( isset( $response['id'] ) && ! empty( $response['id'] ) && ! empty( $response['signing_secret'] ) ) {
+				$this->remove_old_revolut_webhook_if_exist();
+				update_option( $mode . '_revolut_webhook_domain', $web_hook_url );
+				update_option( $mode . '_revolut_webhook_domain_signing_secret', $response['signing_secret'] );
+
 				return true;
 			}
 		} catch ( Exception $e ) { // phpcs:ignore
@@ -350,24 +428,30 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	 */
 	public function setup_revolut_synchronous_webhook() {
 		try {
-			$web_hook_url = get_site_url( null, '/wp-json/wc/v3/revolut', 'https' );
-
 			$mode = $this->get_option( 'mode' );
 			$mode = empty( $mode ) ? 'sandbox' : $mode;
 
-			if ( $this->get_option( 'revolut_pay_synchronous_webhook_domain_' . $mode ) === $web_hook_url ) {
+			$web_hook_url = get_site_url( null, self::$address_validation_webhook_endpoint_new . '/' . $mode, 'https' );
+			$location_id  = $this->setup_revolut_location();
+
+			if ( get_option( 'revolut_pay_synchronous_webhook_domain_' . $mode . '_' . $location_id ) === $web_hook_url ) {
+				update_option( 'revolut_' . $mode . '_location_id', $location_id );
 				return true;
 			}
 
-			$body       = array(
-				'url'        => $web_hook_url,
-				'event_type' => 'fast_checkout.validate_address',
+			$body = array(
+				'url'         => $web_hook_url,
+				'event_type'  => 'fast_checkout.validate_address',
+				'location_id' => $location_id,
 			);
+
 			$api_client = new WC_Revolut_API_Client( $this, true );
 			$response   = $api_client->post( '/synchronous-webhooks', $body );
 
 			if ( isset( $response['signing_key'] ) && ! empty( $response['signing_key'] ) ) {
-				$this->update_option( 'revolut_pay_synchronous_webhook_domain_' . $mode, $web_hook_url );
+				update_option( 'revolut_' . $mode . '_location_id', $location_id );
+				update_option( 'revolut_pay_synchronous_webhook_domain_' . $mode . '_' . $location_id, $web_hook_url );
+				update_option( 'revolut_pay_synchronous_webhook_domain_' . $mode . '_signing_key', $response['signing_key'] );
 				$this->add_success_message( __( 'Synchronous Webhook url successfully configured', 'revolut-gateway-for-woocommerce' ) );
 				return true;
 			}
@@ -378,6 +462,14 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Get Revolut Location
+	 */
+	public function get_revolut_location() {
+		$mode = empty( $this->get_option( 'mode' ) ) ? 'sandbox' : $this->get_option( 'mode' );
+		return get_option( 'revolut_' . $mode . '_location_id' );
 	}
 
 	/**
@@ -404,7 +496,7 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	 * @param string $submit request key.
 	 */
 	public function check_is_get_data_submitted( $submit ) {
-        return isset( $_GET[ $submit ] );  // phpcs:ignore
+		return isset( $_GET[ $submit ] ); // phpcs:ignore 
 	}
 
 	/**
@@ -413,23 +505,6 @@ class WC_Revolut_Settings_API extends WC_Settings_API {
 	 * @param string $get_key request key.
 	 */
 	public function get_request_data( $get_key ) {
-        if ( ! isset( $_GET[ $get_key ] ) ) { // phpcs:ignore
-			return null;
-		}
-
-        return $this->recursive_sanitize_text_field( $_GET[ $get_key ] ); // phpcs:ignore
-	}
-
-	/**
-	 * Clear data.
-	 *
-	 * @param mixed $var data for cleaning.
-	 */
-	public function recursive_sanitize_text_field( $var ) {
-		if ( is_array( $var ) ) {
-			return array_map( array( $this, 'recursive_sanitize_text_field' ), $var );
-		} else {
-			return sanitize_text_field( wp_unslash( $var ) );
-		}
+		return isset( $_GET[ $get_key ] ) ? wc_clean( wp_unslash( $_GET[ $get_key ] ) ) : ''; // phpcs:ignore 
 	}
 }

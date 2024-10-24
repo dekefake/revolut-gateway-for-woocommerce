@@ -34,20 +34,31 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 * @throws Exception Exception.
 	 */
 	public function create_revolut_order( WC_Revolut_Order_Descriptor $order_descriptor, $is_express_checkout = false ) {
-		$capture = 'authorize' === $this->api_settings->get_option( 'payment_action' ) || $is_express_checkout ? 'MANUAL' : 'AUTOMATIC';
+		$capture = 'authorize' === $this->api_settings->get_option( 'payment_action' ) || $is_express_checkout ? 'manual' : 'automatic';
 
 		$body = array(
 			'amount'       => $order_descriptor->amount,
 			'currency'     => $order_descriptor->currency,
-			'customer_id'  => $order_descriptor->revolut_customer_id,
 			'capture_mode' => $capture,
 		);
 
-		if ( $is_express_checkout ) {
-			$body['cancel_authorised_after'] = WC_REVOLUT_AUTO_CANCEL_TIMEOUT;
+		if ( ! empty( $order_descriptor->revolut_customer_id ) ) {
+			$body['customer'] = array( 'id' => $order_descriptor->revolut_customer_id );
 		}
 
-		$json = $this->api_client->post( '/orders', $body );
+		if ( $is_express_checkout ) {
+			$body['cancel_authorised_after'] = WC_REVOLUT_AUTO_CANCEL_TIMEOUT;
+			$location_id                     = $this->api_settings->get_revolut_location();
+			if ( $location_id ) {
+				$body['location_id'] = $location_id;
+			}
+		}
+
+		$json = $this->api_client->post( '/orders', $body, false, true );
+
+		if ( isset( $json['token'] ) ) {
+			$json['public_id'] = $json['token'];
+		}
 
 		if ( empty( $json['id'] ) || empty( $json['public_id'] ) ) {
 			throw new Exception( 'Something went wrong: ' . wp_json_encode( $json, JSON_PRETTY_PRINT ) );
@@ -75,21 +86,195 @@ trait WC_Gateway_Revolut_Helper_Trait {
 
 		return $json['public_id'];
 	}
+
+		/**
+		 * Update Revolut Order.
+		 *
+		 * @param WC_Revolut_Order_Descriptor $order_descriptor Revolut Order Descriptor.
+		 * @param String                      $public_id Revolut public id.
+		 * @param Bool                        $is_revpay_express_checkout is revpay express checkout.
+		 *
+		 * @return mixed
+		 * @throws Exception Exception.
+		 */
+	public function update_revolut_order( WC_Revolut_Order_Descriptor $order_descriptor, $public_id, $is_revpay_express_checkout = false ) {
+		$order_id = null;
+
+		if ( $public_id ) {
+			$order_id = $this->get_revolut_order_by_public_id( $public_id );
+		}
+
+		$body = array(
+			'amount'      => $order_descriptor->amount,
+			'currency'    => $order_descriptor->currency,
+			'customer_id' => $order_descriptor->revolut_customer_id,
+		);
+
+		if ( empty( $order_id ) ) {
+			return $this->create_revolut_order( $order_descriptor, $is_revpay_express_checkout );
+		}
+
+		$revolut_order = $this->api_client->get( "/orders/$order_id" );
+
+		if ( ! isset( $revolut_order['public_id'] ) || ! isset( $revolut_order['id'] ) || 'PENDING' !== $revolut_order['state'] ) {
+			return $this->create_revolut_order( $order_descriptor, $is_revpay_express_checkout );
+		}
+
+		$revolut_order = $this->api_client->patch( "/orders/$order_id", $body );
+
+		if ( ! isset( $revolut_order['public_id'] ) || ! isset( $revolut_order['id'] ) ) {
+			return $this->create_revolut_order( $order_descriptor, $is_revpay_express_checkout );
+		}
+
+		if ( $is_revpay_express_checkout ) {
+			$this->add_or_update_temp_session( $revolut_order['id'] );
+		}
+
+		return $revolut_order['public_id'];
+	}
+
+	/**
+	 * Save line items info into Revolut order.
+	 *
+	 * @param int    $wc_order_id WooCommerce order id.
+	 * @param string $revolut_order_id Revolut order id.
+	 */
+	public function save_order_line_items( $wc_order_id, $revolut_order_id ) {
+		try {
+			$order = wc_get_order( $wc_order_id );
+
+			if ( ! $order ) {
+				return array();
+			}
+
+			$order_details = array(
+				'line_items' => $this->collect_order_line_items( $order ),
+				'shipping'   => $this->collect_order_shipping_info( $order ),
+			);
+
+			$this->api_client->patch(
+				"/orders/$revolut_order_id",
+				$order_details,
+				false,
+				true
+			);
+		} catch ( Exception $e ) {
+			$this->log_error( 'save_order_line_items failed : ' . $e->getMessage() );
+		}
+	}
+
+	/**
+	 * Get line items from WC order.
+	 *
+	 * @param object $order WooCommerce order object.
+	 */
+	public function collect_order_shipping_info( $order ) {
+		$shipping_address     = $order->get_address( 'shipping' );
+		$billing_phone_number = preg_replace( '/[^0-9]/', '', $order->get_billing_phone() );
+
+			$shipping = array(
+				'address' => array(
+					'street_line_1' => $shipping_address['address_1'],
+					'street_line_2' => $shipping_address['address_2'],
+					'region'        => $shipping_address['state'],
+					'city'          => $shipping_address['city'],
+					'country_code'  => $shipping_address['country'],
+					'postcode'      => $shipping_address['postcode'],
+				),
+				'contact' => array(
+					'name'  => $shipping_address['first_name'] . ' ' . $shipping_address['last_name'],
+					'email' => $order->get_billing_email(),
+					'phone' => empty( $billing_phone_number ) ? null : $billing_phone_number,
+				),
+			);
+
+			return $shipping;
+	}
+
+	/**
+	 * Get shipping details from WC order.
+	 *
+	 * @param object $order WooCommerce order object.
+	 */
+	public function collect_order_line_items( $order ) {
+		if ( ! $order ) {
+			return array();
+		}
+
+		$line_items = array();
+		$currency   = $order->get_currency();
+
+		foreach ( $order->get_items() as $item ) {
+			$product           = $item->get_product();
+			$product_id        = $product->get_id();
+			$product_name      = $product->get_name();
+			$product_type      = $product->is_virtual() ? 'service' : 'physical';
+			$quantity          = $item->get_quantity();
+			$unit_price_amount = $this->get_revolut_order_total( $item->get_subtotal(), $currency );
+			$total_amount      = $this->get_revolut_order_total( $item->get_total(), $currency );
+			$description       = $product->get_description();
+			$product_url       = rawurlencode( get_permalink( $product_id ) );
+			$image_urls        = $this->get_product_images( $product );
+
+			if ( ! empty( $description ) && strlen( $description ) > 1024 ) {
+				$description = substr( $description, 0, 1024 );
+			}
+
+			$line_items[] = array(
+				'name'              => $product_name,
+				'type'              => $product_type,
+				'quantity'          => array(
+					'value' => $quantity,
+				),
+				'unit_price_amount' => $unit_price_amount,
+				'total_amount'      => $total_amount,
+				'external_id'       => (string) $product_id,
+				'description'       => $description,
+			);
+		}
+
+		return $line_items;
+	}
+
+	/**
+	 * Extract product images list from product object.
+	 *
+	 * @param object $product WooCommerce Product object.
+	 */
+	public function get_product_images( $product ) {
+		$all_image_urls     = array();
+		$gallery_image_urls = array();
+
+		$main_image_url = rawurlencode( wp_get_attachment_url( $product->get_image_id() ) );
+
+		if ( $main_image_url ) {
+			$all_image_urls[] = $main_image_url;
+		}
+
+		$gallery_image_ids = $product->get_gallery_image_ids();
+
+		foreach ( $gallery_image_ids as $image_id ) {
+			$gallery_image_urls[] = rawurlencode( wp_get_attachment_url( $image_id ) );
+		}
+
+		return array_merge( $all_image_urls, $gallery_image_urls );
+	}
+
 	/**
 	 * Retrieve the revolut customer's id.
 	 *
-	 * @param  string $billing_email holds customer billing phone.
-	 * @param  string $billing_phone holds customer email address.
+	 * @param  string $billing_phone holds customer phone address.
+	 * @param  string $billing_email holds customer billing email.
 	 * @throws Exception Exception.
 	 */
-	public function get_or_create_revolut_customer( $billing_email = '', $billing_phone = '' ) {
+	public function get_or_create_revolut_customer( $billing_phone = '', $billing_email = '' ) {
 		if ( empty( $billing_email ) || empty( $billing_phone ) ) {
 			$wc_customer   = WC()->customer;
 			$billing_email = $wc_customer->get_billing_email();
 			$billing_phone = $wc_customer->get_billing_phone();
 		}
 
-		if ( empty( $billing_email ) || empty( $billing_phone ) ) {
+		if ( empty( $billing_email ) ) {
 			return;
 		}
 
@@ -129,16 +314,13 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 */
 	public function create_revolut_customer( $billing_phone, $billing_email ) {
 		try {
-			if ( empty( $billing_phone ) || empty( $billing_email ) ) {
-				return;
-			}
-
-			$revolut_customer_id = null;
-
 			$body = array(
-				'phone' => $billing_phone,
 				'email' => $billing_email,
 			);
+
+			if ( ! empty( $billing_phone ) ) {
+				$body['phone'] = $billing_phone;
+			}
 
 			$revolut_customer    = $this->api_client->get( '/customers?term=' . $billing_email );
 			$revolut_customer_id = ! empty( $revolut_customer[0]['id'] ) ? $revolut_customer[0]['id'] : '';
@@ -149,7 +331,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 			}
 
 			if ( ! $revolut_customer_id ) {
-				return $revolut_customer_id;
+				return;
 			}
 
 			$this->insert_revolut_customer_id( $revolut_customer_id );
@@ -186,48 +368,6 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	}
 
 	/**
-	 * Update Revolut Order.
-	 *
-	 * @param WC_Revolut_Order_Descriptor $order_descriptor Revolut Order Descriptor.
-	 * @param String                      $public_id Revolut public id.
-	 * @param Bool                        $is_revpay_express_checkout is revpay express checkout.
-	 *
-	 * @return mixed
-	 * @throws Exception Exception.
-	 */
-	public function update_revolut_order( WC_Revolut_Order_Descriptor $order_descriptor, $public_id, $is_revpay_express_checkout = false ) {
-		$order_id = $this->get_revolut_order_by_public_id( $public_id );
-
-		$body = array(
-			'amount'      => $order_descriptor->amount,
-			'currency'    => $order_descriptor->currency,
-			'customer_id' => $order_descriptor->revolut_customer_id,
-		);
-
-		if ( empty( $order_id ) ) {
-			return $this->create_revolut_order( $order_descriptor, $is_revpay_express_checkout );
-		}
-
-		$revolut_order = $this->api_client->get( "/orders/$order_id" );
-
-		if ( ! isset( $revolut_order['public_id'] ) || ! isset( $revolut_order['id'] ) || 'PENDING' !== $revolut_order['state'] ) {
-			return $this->create_revolut_order( $order_descriptor, $is_revpay_express_checkout );
-		}
-
-		$revolut_order = $this->api_client->patch( "/orders/$order_id", $body );
-
-		if ( ! isset( $revolut_order['public_id'] ) || ! isset( $revolut_order['id'] ) ) {
-			return $this->create_revolut_order( $order_descriptor, $is_revpay_express_checkout );
-		}
-
-		if ( $is_revpay_express_checkout ) {
-			$this->add_or_update_temp_session( $revolut_order['id'] );
-		}
-
-		return $revolut_order['public_id'];
-	}
-
-	/**
 	 * Convert saved customer session into current session.
 	 *
 	 * @param string $id_revolut_order Revolut order id.
@@ -240,9 +380,6 @@ trait WC_Gateway_Revolut_Helper_Trait {
 
 		global $wpdb;
 		$temp_session = $wpdb->get_row( $wpdb->prepare( 'SELECT temp_session FROM ' . $wpdb->prefix . 'wc_revolut_temp_session WHERE order_id=%s', array( $id_revolut_order ) ), ARRAY_A ); // db call ok; no-cache ok.
-
-		$this->log_info( 'start convert_revolut_order_metadata_into_wc_session temp_session:' );
-		$this->log_info( $temp_session['temp_session'] );
 
 		$wc_order_metadata = json_decode( $temp_session['temp_session'], true );
 		$id_wc_customer    = (int) $wc_order_metadata['id_customer'];
@@ -360,6 +497,9 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 * @param string $lastname Lastname.
 	 */
 	public function get_wc_shipping_address( $shipping_address, $revolut_customer_email, $revolut_customer_phone, $firstname, $lastname ) {
+		if ( isset( $shipping_address['country'] ) ) {
+			$shipping_address['country'] = strtoupper( $shipping_address['country'] );
+		}
 		$address['shipping_first_name'] = $firstname;
 		$address['shipping_last_name']  = $lastname;
 		$address['shipping_email']      = $revolut_customer_email;
@@ -385,6 +525,9 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 * @param string $lastname Lastname.
 	 */
 	public function get_wc_billing_address( $billing_address, $revolut_customer_email, $revolut_customer_phone, $firstname, $lastname ) {
+		if ( isset( $billing_address['country'] ) ) {
+			$billing_address['country'] = strtoupper( $billing_address['country'] );
+		}
 		$address                       = array();
 		$address['billing_first_name'] = $firstname;
 		$address['billing_last_name']  = $lastname;
@@ -462,7 +605,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 		$revolut_customer_id = reset( $revolut_customer_id );
 
 		if ( empty( $revolut_customer_id ) ) {
-			$revolut_customer_id = null;
+			$revolut_customer_id = '';
 		}
 
 		$revolut_customer_id_with_mode = explode( '_', $revolut_customer_id );
@@ -530,6 +673,12 @@ trait WC_Gateway_Revolut_Helper_Trait {
 
 		$revolut_order = $this->api_client->get( "/orders/$order_id" );
 
+		$revolut_order_amount = $this->get_revolut_order_amount( $revolut_order );
+
+		if ( $revolut_order_amount === $revolut_order_total ) {
+			return true;
+		}
+
 		if ( ! isset( $revolut_order['public_id'] ) || ! isset( $revolut_order['id'] ) || 'PENDING' !== $revolut_order['state'] ) {
 			return false;
 		}
@@ -577,7 +726,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 				return $merchant_public_key;
 			}
 
-			$merchant_public_key = $this->api_client->get( WC_GATEWAY_PUBLIC_KEY_ENDPOINT, true );
+			$merchant_public_key = $this->api_client->get( WC_GATEWAY_PUBLIC_KEY_ENDPOINT, false, true );
 			$merchant_public_key = isset( $merchant_public_key['public_key'] ) ? $merchant_public_key['public_key'] : '';
 
 			if ( empty( $merchant_public_key ) ) {
@@ -587,6 +736,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 			$this->set_revolut_merchant_public_key( $merchant_public_key );
 			return $merchant_public_key;
 		} catch ( Exception $e ) {
+			$this->log_error( 'get_merchant_public_api_key: ' . $e->getMessage() );
 			return '';
 		}
 	}
@@ -598,8 +748,8 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 */
 	public function check_feature_support() {
 		try {
-			$this->api_client->set_public_key( $this->get_revolut_merchant_public_key() );
-			$merchant_features = $this->api_client->get( '/public/merchant', true );
+			$this->api_client->set_public_key( $this->get_merchant_public_api_key() );
+			$merchant_features = $this->api_client->get( '/merchant', true );
 
 			return isset( $merchant_features['features'] ) && is_array( $merchant_features['features'] ) && in_array(
 				WC_GATEWAY_REVPAY_INDEX,
@@ -617,7 +767,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 * @return bool
 	 */
 	public function is_subs_change_payment() {
-		return ( isset( $_GET['pay_for_order'] ) && isset( $_GET['change_payment_method'] ) ); // phpcs:ignore
+		return get_query_var( 'pay_for_order' ) && get_query_var( 'change_payment_method' );
 	}
 
 	/**
@@ -639,7 +789,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 *
 	 * @param string $value Revolut public id.
 	 */
-	protected function set_revolut_public_id( $value ) {
+	public function set_revolut_public_id( $value ) {
 		WC()->session->set( "{$this->api_client->mode}_revolut_public_id", $value );
 	}
 
@@ -657,7 +807,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 *
 	 * @return array|string|null
 	 */
-	protected function get_revolut_public_id() {
+	public function get_revolut_public_id() {
 		$public_id = WC()->session->get( "{$this->api_client->mode}_revolut_public_id" );
 
 		if ( empty( $public_id ) ) {
@@ -688,7 +838,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 * @return array|string|null
 	 */
 	protected function get_revolut_merchant_public_key() {
-		return WC()->session->get( "{$this->api_client->mode}_revolut_merchant_public_key" );
+		return get_option( "{$this->api_client->mode}_revolut_merchant_public_key" );
 	}
 
 	/**
@@ -697,7 +847,7 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	 * @param string $value Revolut Merchant public Key.
 	 */
 	protected function set_revolut_merchant_public_key( $value ) {
-		WC()->session->set( "{$this->api_client->mode}_revolut_merchant_public_key", $value );
+		update_option( "{$this->api_client->mode}_revolut_merchant_public_key", $value );
 	}
 
 	/**
@@ -810,76 +960,6 @@ trait WC_Gateway_Revolut_Helper_Trait {
 	}
 
 	/**
-	 * Check is data submitted for GET request.
-	 *
-	 * @param string $submit request key.
-	 */
-	public function check_is_get_data_submitted( $submit ) {
-		return isset( $_GET[ $submit ] );  // phpcs:ignore
-	}
-
-	/**
-	 * Check is data submitted for POST request.
-	 *
-	 * @param string $submit request key.
-	 */
-	public function check_is_post_data_submitted( $submit ) {
-		return isset( $_POST[ $submit ] );  // phpcs:ignore
-	}
-
-	/**
-	 * Safe get posted integer data
-	 *
-	 * @param string $post_key request key.
-	 */
-	public function get_posted_integer_data( $post_key ) {
-		if ( ! isset( $_POST[ $post_key ] ) ) { // phpcs:ignore
-			return 0;
-		}
-
-		return (int) $_POST[ $post_key ];  // phpcs:ignore
-	}
-
-	/**
-	 * Safe get posted data
-	 *
-	 * @param string $post_key request key.
-	 */
-	public function get_post_request_data( $post_key ) {
-		if ( ! isset( $_POST[ $post_key ] ) ) { // phpcs:ignore
-			return null;
-		}
-
-		return $this->recursive_sanitize_text_field( $_POST[ $post_key ]);  // phpcs:ignore
-	}
-
-	/**
-	 * Safe get request data
-	 *
-	 * @param string $get_key request key.
-	 */
-	public function get_request_data( $get_key ) {
-		if ( ! isset( $_GET[ $get_key ] ) ) { // phpcs:ignore
-			return null;
-		}
-
-		return $this->recursive_sanitize_text_field( $_GET[ $get_key ] ); // phpcs:ignore
-	}
-
-	/**
-	 * Clear data.
-	 *
-	 * @param mixed $var data for cleaning.
-	 */
-	public function recursive_sanitize_text_field( $var ) {
-		if ( is_array( $var ) ) {
-			return array_map( array( $this, 'recursive_sanitize_text_field' ), $var );
-		} else {
-			return sanitize_text_field( wp_unslash( $var ) );
-		}
-	}
-
-	/**
 	 * Get two-digit language iso code.
 	 */
 	public function get_lang_iso_code() {
@@ -909,5 +989,153 @@ trait WC_Gateway_Revolut_Helper_Trait {
 		}
 
 		return in_array( $order_status, $selected_capture_status_list, true );
+	}
+
+	/**
+	 * Get available card brands
+	 *
+	 * @param string $amount order amount.
+	 * @param string $currency order currency.
+	 */
+	public function get_available_card_brands( $amount, $currency ) {
+		try {
+			$available_card_brands = get_option( "revolut_{$this->api_client->mode}_{$currency}_available_card_brands" );
+
+			if ( ! $available_card_brands ) {
+				$available_card_brands = $this->fetch_available_payment_methods_and_brand_logos( $amount, $currency )['card_brands'];
+			}
+			return $available_card_brands;
+		} catch ( Exception $e ) {
+			$this->log_error( 'get_available_card_brands: ' . $e->getMessage() );
+			return array();
+		}
+	}
+
+	/**
+	 * Get available payment methods
+	 *
+	 * @param string $amount order amount.
+	 * @param string $currency order currency.
+	 */
+	public function get_available_payment_methods( $amount, $currency ) {
+		try {
+			$available_payment_methods = get_option( "revolut_{$this->api_client->mode}_{$currency}_available_payment_methods" );
+
+			if ( ! $available_payment_methods ) {
+				$available_payment_methods = $this->fetch_available_payment_methods_and_brand_logos( $amount, $currency )['payment_methods'];
+			}
+			return $available_payment_methods;
+
+		} catch ( Exception $e ) {
+			$this->log_error( 'get_available_payment_methods: ' . $e->getMessage() );
+			return array();
+		}
+	}
+
+	/**
+	 * Check the current page
+	 */
+	public function is_order_payment_page() {
+		try {
+			global $wp;
+			return is_checkout() && ! empty( $wp->query_vars['order-pay'] );
+		} catch ( Exception $e ) {
+			return false;
+		}
+	}
+
+	/**
+	 * Check the current page
+	 *
+	 * @param string|array $payment_method Payment method name.
+	 */
+	public function is_payment_method_available( $payment_method ) {
+		try {
+			if ( WC()->cart ) {
+				$total                     = WC()->cart->get_total( '' );
+				$currency                  = get_woocommerce_currency();
+				$total                     = $this->get_revolut_order_total( $total, $currency );
+				$available_payment_methods = $this->get_available_payment_methods( $total, $currency );
+
+				if ( is_array( $payment_method ) ) {
+					return count( array_intersect( $payment_method, $available_payment_methods ) );
+				}
+
+				return in_array( $payment_method, $available_payment_methods, true );
+			}
+		} catch ( Exception $e ) {
+			$this->log_error( 'is_payment_method_available: ' . $e->getMessage() );
+			return false;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Update available payment methods in DB
+	 *
+	 * @param string $amount amount.
+	 * @param string $currency stores default currency.
+	 */
+	public function fetch_available_payment_methods_and_brand_logos( $amount = 0, $currency = '' ) {
+
+		$currency = empty( $currency ) ? get_woocommerce_currency() : $currency;
+		$amount   = empty( $amount ) ? 1 : $amount;
+
+		$available_payment_methods = array();
+		$available_card_brands     = array();
+
+		$this->api_client->set_public_key( $this->get_merchant_public_api_key() );
+		$order_details = $this->api_client->get( "/available-payment-methods?amount=$amount&currency=$currency", true );
+
+		if ( isset( $order_details['available_payment_methods'] ) && ! empty( $order_details['available_payment_methods'] ) ) {
+			$available_payment_methods = array_map( 'strtolower', $order_details['available_payment_methods'] );
+			update_option( "revolut_{$this->api_client->mode}_{$currency}_available_payment_methods", $available_payment_methods );
+		}
+
+		if ( isset( $order_details['available_card_brands'] ) && ! empty( $order_details['available_card_brands'] ) ) {
+			$available_card_brands = array_map( 'strtolower', $order_details['available_card_brands'] );
+			update_option( "revolut_{$this->api_client->mode}_{$currency}_available_card_brands", $available_card_brands );
+		}
+		return array(
+			'payment_methods' => $available_payment_methods,
+			'card_brands'     => $available_card_brands,
+		);
+	}
+
+	/**
+	 * Loads order meta data based on a partial key
+	 *
+	 * @param object $order WC Order object.
+	 * @param array  $metakey_list key of meta data.
+	 */
+	public function get_order_meta_by_partial_key( $order, $metakey_list ) {
+		foreach ( $order->get_meta_data() as $meta ) {
+			foreach ( $metakey_list as $meta_key ) {
+				if ( strpos( $meta->key, $meta_key ) !== false ) {
+					return $meta->value;
+				}
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Generates custom RPay label with icon or link banner
+	 *
+	 * @param string $title current title.
+	 * @param string $gateway_id gateway id.
+	 * @return string
+	 */
+	public function custom_revolut_pay_label( $title, $gateway_id ) {
+		if ( $gateway_id === $this->id ) {
+			$title = '
+			<div class="revolut-pay-label-title-wrapper">
+				<span class="revolut-pay-label-title">' . $this->title . '</span>
+				<div id="revolut-pay-label-informational-icon"></div>
+			</div>';
+		}
+		return $title;
 	}
 }

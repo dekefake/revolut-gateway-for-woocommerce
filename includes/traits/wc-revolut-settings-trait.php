@@ -47,7 +47,7 @@ trait WC_Revolut_Settings_Trait {
 	 */
 	public function output_settings_nav() {
 		if ( $this->check_is_get_data_submitted( 'page' ) && $this->check_is_get_data_submitted( 'section' ) ) {
-			$is_revolut_section = 'wc-settings' === $this->get_request_data( 'page' ) && in_array( $this->get_request_data( 'section' ), WC_REVOLUT_GATEWAYS, true ) || $this->get_request_data( 'section' ) === 'revolut_advanced_settings';
+			$is_revolut_section = 'wc-settings' === $this->get_request_data( 'page' ) && in_array( $this->get_request_data( 'section' ), WC_REVOLUT_GATEWAYS, true ) || $this->get_request_data( 'section' ) === 'revolut_advanced_settings' || $this->get_request_data( 'section' ) === 'revolut_promotional_tab';
 			if ( $is_revolut_section ) {
 				include REVOLUT_PATH . 'templates/html-settings-nav.php';
 			}

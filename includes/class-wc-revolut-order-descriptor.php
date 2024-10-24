@@ -44,7 +44,7 @@ class WC_Revolut_Order_Descriptor {
 	 * @param string $revolut_customer_id Revolut customer id.
 	 */
 	public function __construct( $amount, $currency, $revolut_customer_id ) {
-		if ( $this->check_is_get_data_submitted( 'pay_for_order' ) && ! empty( $this->get_request_data( 'key' ) ) ) {
+		if ( (bool) get_query_var( 'pay_for_order' ) && ! empty( get_query_var( 'key' ) ) ) {
 			global $wp;
 			$order  = wc_get_order( wc_clean( $wp->query_vars['order-pay'] ) );
 			$amount = $order->get_total();

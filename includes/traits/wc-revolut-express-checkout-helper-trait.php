@@ -218,7 +218,7 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 			foreach ( $variation_attributes as $attribute_name => $attribute_values ) {
 				$attribute_key = 'attribute_' . sanitize_title( $attribute_name );
 
-				if ( $this->check_is_get_data_submitted( $attribute_key ) ) {
+				if ( isset( $_GET[ $attribute_key ] ) ) { // phpcs:ignore
 					$attributes[ $attribute_key ] = sanitize_text_field( wp_unslash( $_GET[ $attribute_key ] ) ); // phpcs:ignore
 				} else {
 					$attributes[ $attribute_key ] = $product->get_variation_default_attribute( $attribute_name );
@@ -305,21 +305,15 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 	 */
 	public function get_wc_revolut_payment_request_params() {
 		try {
-			$revolut_public_id = $this->create_express_checkout_public_id();
-			$total             = WC()->cart->get_total( '' );
-			$currency          = get_woocommerce_currency();
-			$total             = $this->get_revolut_order_total( $total, $currency );
-
+			$currency                         = get_woocommerce_currency();
 			$revolut_payment_request_settings = get_option( 'woocommerce_revolut_payment_request_settings', array() );
 			$revolut_pay_settings             = get_option( 'woocommerce_revolut_pay_settings', array() );
 
 			return array(
-				'total'                         => $total,
 				'currency'                      => $currency,
 				'locale'                        => $this->get_lang_iso_code(),
 				'publicToken'                   => $this->get_merchant_public_api_key(),
 				'ajax_url'                      => WC_AJAX::get_endpoint( '%%wc_revolut_gateway_ajax_endpoint%%' ),
-				'revolut_public_id'             => $revolut_public_id,
 				'revolut_pay_origin_url'        => str_replace( array( 'https://', 'http://' ), '', get_site_url() ),
 				'revolut_pay_button_theme'      => ! empty( $revolut_pay_settings['revolut_pay_button_theme'] ) ? $revolut_pay_settings['revolut_pay_button_theme'] : '',
 				'revolut_pay_button_size'       => ! empty( $revolut_pay_settings['revolut_pay_button_size'] ) ? $revolut_pay_settings['revolut_pay_button_size'] : '',
@@ -335,6 +329,7 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 					'update_shipping'             => wp_create_nonce( 'wc-revolut-update-shipping-method' ),
 					'update_order_total'          => wp_create_nonce( 'wc-revolut-update-order-total' ),
 					'load_order_data'             => wp_create_nonce( 'wc-revolut-load-order-data' ),
+					'create_order'                => wp_create_nonce( 'wc-revolut-create-order' ),
 					'cancel_order'                => wp_create_nonce( 'wc-revolut-cancel-order' ),
 					'get_express_checkout_params' => wp_create_nonce( 'wc-revolut-get-express-checkout-params' ),
 					'get_payment_request_params'  => wp_create_nonce( 'wc-revolut-get-payment-request-params' ),
@@ -342,7 +337,9 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 					'add_to_cart'                 => wp_create_nonce( 'wc-revolut-pr-add-to-cart' ),
 					'get_selected_product_data'   => wp_create_nonce( 'wc-revolut-get-selected-product-data' ),
 					'log_errors'                  => wp_create_nonce( 'wc-revolut-log-errors' ),
+					'set_error_message'           => wp_create_nonce( 'wc-revolut-set-error-message' ),
 					'clear_cart'                  => wp_create_nonce( 'wc-revolut-clear-cart' ),
+					'process_payment_result'      => wp_create_nonce( 'wc-revolut-process-payment-result' ),
 				),
 				'is_product_page'               => $this->is_product(),
 				'redirect_url'                  => $this->get_redirect_url(),
@@ -356,7 +353,7 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 				),
 			);
 		} catch ( Exception $e ) {
-			$this->log_error( $e->getMessage() );
+			$this->log_error( 'get_wc_revolut_payment_request_params : ' . $e->getMessage() );
 		}
 	}
 
@@ -404,7 +401,7 @@ trait WC_Gateway_Revolut_Express_Checkout_Helper_Trait {
 			$payment_request_button_locations = array();
 		}
 
-		if ( ! is_cart() && ! $this->is_product() ) {
+		if ( ! is_cart() && ! $this->is_product() && ! is_checkout() ) {
 			return false;
 		}
 

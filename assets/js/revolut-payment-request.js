@@ -14,6 +14,7 @@ jQuery(function ($) {
     }
 
     sendRequest(getAjaxURL('set_error_message'), {
+      security: wc_revolut_payment_request_params.nonce.set_error_message,
       revolut_payment_request_error: message,
     })
       .then(response => {
@@ -28,6 +29,7 @@ jQuery(function ($) {
     sendRequest(
       getAjaxURL('log_error'),
       {
+        security: wc_revolut_payment_request_params.nonce.log_errors,
         revolut_payment_request_error: message,
       },
       false,
@@ -89,8 +91,6 @@ jQuery(function ($) {
       product_data['add_to_cart'] = add_to_cart
       product_data['is_revolut_pay'] = revpay ? 1 : 0
       product_data['security'] = wc_revolut_payment_request_params.nonce.add_to_cart
-      product_data['revolut_public_id'] =
-        wc_revolut_payment_request_params.revolut_public_id
       product_data['product_id'] = $('.single_add_to_cart_button').val()
       product_data['qty'] = $('.quantity .qty').val()
       product_data['attributes'] = []
@@ -127,7 +127,6 @@ jQuery(function ($) {
   function getShippingOptions(address) {
     let address_data = {
       security: wc_revolut_payment_request_params.nonce.shipping,
-      revolut_public_id: wc_revolut_payment_request_params.revolut_public_id,
       country: address.country,
       state: address.region,
       postcode: address.postalCode,
@@ -155,7 +154,6 @@ jQuery(function ($) {
 
   function updateShippingOptions(shippingOption) {
     let shipping_option_data = {
-      revolut_public_id: wc_revolut_payment_request_params.revolut_public_id,
       security: wc_revolut_payment_request_params.nonce.update_shipping,
       shipping_method: [shippingOption.id],
       is_product_page: wc_revolut_payment_request_params.is_product_page,
@@ -182,31 +180,6 @@ jQuery(function ($) {
       sendRequest(getAjaxURL('update_payment_total'), shipping_option_data)
         .then(response => {
           resolve(response)
-        })
-        .catch(error => {
-          reject(error)
-        })
-    })
-  }
-
-  function udpateExpressCheckoutParams(revpay = false) {
-    return new Promise((resolve, reject) => {
-      sendRequest(
-        getAjaxURL(revpay ? 'get_express_checkout_params' : 'get_payment_request_params'),
-        {
-          security: revpay
-            ? wc_revolut_payment_request_params.nonce.get_express_checkout_params
-            : wc_revolut_payment_request_params.nonce.get_payment_request_params,
-        },
-      )
-        .then(response => {
-          if (response.success) {
-            wc_revolut_payment_request_params.revolut_public_id =
-              response.revolut_public_id
-            wc_revolut_payment_request_params.nonce.checkout = response.checkout_nonce
-            return resolve()
-          }
-          reject('')
         })
         .catch(error => {
           reject(error)
@@ -249,6 +222,7 @@ jQuery(function ($) {
     data['is_express_checkout'] = 1
     data['revolut_gateway'] = revolut_gateway
     data['revolut_public_id'] = wc_revolut_payment_request_params.revolut_public_id
+    data['security'] = wc_revolut_payment_request_params.nonce.process_payment_result
     data['revolut_payment_error'] = errorMessage
     data['wc_order_id'] = wc_order_id
     data['reload_checkout'] = 0
@@ -278,6 +252,7 @@ jQuery(function ($) {
       sendRequest(getAjaxURL('create_order'), {
         payment_method: payment_method,
         _wpnonce: wc_revolut_payment_request_params.nonce.checkout,
+        security: wc_revolut_payment_request_params.nonce.create_order,
         shipping_method: [orderSelectedShippingOption],
         payment_request_type: paymentRequestType,
         revolut_public_id: wc_revolut_payment_request_params.revolut_public_id,
@@ -348,70 +323,76 @@ jQuery(function ($) {
       $('.wc-revolut-payment-request-instance').not(':last').remove()
     }
 
-    udpateExpressCheckoutParams().then(function () {
-      const RC = RevolutCheckout(wc_revolut_payment_request_params.revolut_public_id)
-      const revolutPaymentReuqestButton = document.getElementById(
-        'revolut-payment-request-button',
-      )
+    const { paymentRequest } = RevolutCheckout.payments({
+      locale: wc_revolut_payment_request_params.locale,
+      publicToken: wc_revolut_payment_request_params.publicToken,
+    })
 
-      paymentRequest = RC.paymentRequest({
-        target: revolutPaymentReuqestButton,
-        requestShipping: wc_revolut_payment_request_params.shipping_required,
-        shippingOptions: wc_revolut_payment_request_params.free_shipping_option,
-        onClick() {
-          if (!wc_revolut_payment_request_params.shipping_required) {
-            return createCart(1)
-          }
-        },
-        onShippingOptionChange: selectedShippingOption => {
-          orderSelectedShippingOption = selectedShippingOption['id']
-          return updateShippingOptions(selectedShippingOption)
-        },
-        onShippingAddressChange: selectedShippingAddress => {
-          return createCart(1).then(function () {
-            return getShippingOptions(selectedShippingAddress)
-          })
-        },
-        onSuccess() {
-          submitOrder()
-        },
-        validate(address) {
-          address_info = address
-          return submitWooCommerceOrder()
-        },
-        onError(error) {
-          let errorMessage = error
-
-          if (error['message']) {
-            errorMessage = error['message']
-          }
-
-          if (errorMessage == 'Unknown') {
-            errorMessage =
-              wc_revolut_payment_request_params.error_messages.checkout_general
-          }
-
-          if (wc_order_id) {
-            return submitOrder(errorMessage)
-          }
-
-          displayErrorMessage(errorMessage)
-        },
-        buttonStyle: {
-          action: wc_revolut_payment_request_params.payment_request_button_type,
-          size: wc_revolut_payment_request_params.payment_request_button_size,
-          variant: wc_revolut_payment_request_params.payment_request_button_theme,
-          radius: wc_revolut_payment_request_params.payment_request_button_radius,
-        },
-      })
-
-      paymentRequest.canMakePayment().then(result => {
-        if (result) {
-          paymentRequest.render()
-        } else {
-          paymentRequest.destroy()
+    let paymentRequestButton = document.getElementById('revolut-payment-request-button')
+    const request = paymentRequest.mount(paymentRequestButton, {
+      currency: wc_revolut_payment_request_params.currency,
+      amount: 0,
+      requestShipping: wc_revolut_payment_request_params.shipping_required,
+      shippingOptions: wc_revolut_payment_request_params.free_shipping_option,
+      onClick() {
+        if (!wc_revolut_payment_request_params.shipping_required) {
+          return createCart(1)
         }
-      })
+      },
+      onShippingOptionChange: selectedShippingOption => {
+        orderSelectedShippingOption = selectedShippingOption['id']
+        return updateShippingOptions(selectedShippingOption)
+      },
+      onShippingAddressChange: selectedShippingAddress => {
+        return createCart(1).then(function () {
+          return getShippingOptions(selectedShippingAddress)
+        })
+      },
+      onSuccess() {
+        submitOrder()
+      },
+      validate(address) {
+        address_info = address
+        return getRevolutOrderPublicId().then(() => {
+          return submitWooCommerceOrder()
+        })
+      },
+      createOrder: () => {
+        return {
+          publicId: wc_revolut_payment_request_params.revolut_public_id,
+        }
+      },
+      onError(error) {
+        let errorMessage = error
+
+        if (error['message']) {
+          errorMessage = error['message']
+        }
+
+        if (errorMessage == 'Unknown') {
+          errorMessage = wc_revolut_payment_request_params.error_messages.checkout_general
+        }
+
+        if (wc_order_id) {
+          return submitOrder(errorMessage)
+        }
+
+        displayErrorMessage(errorMessage)
+      },
+      buttonStyle: {
+        action: wc_revolut_payment_request_params.payment_request_button_type,
+        size: wc_revolut_payment_request_params.payment_request_button_size,
+        variant: wc_revolut_payment_request_params.payment_request_button_theme,
+        radius: wc_revolut_payment_request_params.payment_request_button_radius,
+      },
+    })
+
+    request.canMakePayment().then(result => {
+      if (result) {
+        request.render()
+      } else {
+        request.destroy()
+      }
     })
   }
 
@@ -425,77 +406,80 @@ jQuery(function ($) {
       $('.wc-revolut-pay-express-checkout-instance').not(':last').remove()
     }
 
-    udpateExpressCheckoutParams(true).then(function () {
-      instance = RevolutCheckout.payments({
-        locale: wc_revolut_payment_request_params.locale,
-        publicToken: wc_revolut_payment_request_params.publicToken,
-      })
+    const { revolutPay } = RevolutCheckout.payments({
+      locale: wc_revolut_payment_request_params.locale,
+      publicToken: wc_revolut_payment_request_params.publicToken,
+    })
 
-      instance.revolutPay.mount('#revolut-pay-express-checkout-button', {
-        currency: wc_revolut_payment_request_params.currency,
-        totalAmount: parseInt(wc_revolut_payment_request_params.total),
-        requestShipping: true,
-        validate() {
-          return createCart(1, true).then(function (result) {
-            if (result && result.success) {
-              if (wc_revolut_payment_request_params.is_cart_page) {
-                return updatePaymentTotal()
+    revolutPay.mount('#revolut-pay-express-checkout-button', {
+      currency: wc_revolut_payment_request_params.currency,
+      totalAmount: 0,
+      requestShipping: true,
+      createOrder: () => {
+        return new Promise((resolve, reject) =>
+          createCart(1, true).then(result => {
+            getRevolutOrderPublicId().then(publicId => {
+              if (result && result.success) {
+                if (wc_revolut_payment_request_params.is_cart_page) {
+                  updatePaymentTotal().then(() => {
+                    return resolve({ publicId })
+                  })
+                }
+               return resolve({ publicId })
               }
+              displayErrorMessage(
+                wc_revolut_payment_request_params.error_messages.checkout_general,
+              )
+            })
+          }),
+        )
+      },
+      buttonStyle: {
+        cashbackCurrency: wc_revolut_payment_request_params.currency,
+        variant: wc_revolut_payment_request_params.revolut_pay_button_theme,
+        size: wc_revolut_payment_request_params.revolut_pay_button_size,
+        radius: wc_revolut_payment_request_params.revolut_pay_button_radius,
+      },
+      mobileRedirectUrls: {
+        success: wc_revolut_payment_request_params.redirect_url,
+        failure: wc_revolut_payment_request_params.redirect_url,
+        cancel: wc_revolut_payment_request_params.redirect_url,
+      },
+      __metadata: {
+        environment: 'woocommerce',
+        context: wc_revolut_payment_request_params.is_cart_page ? 'cart' : 'product',
+        origin_url: wc_revolut_payment_request_params.revolut_pay_origin_url,
+      },
+    })
 
-              return Promise.resolve(true)
-            }
-          })
-        },
-        createOrder: () => {
-          return { publicId: wc_revolut_payment_request_params.revolut_public_id }
-        },
-        buttonStyle: {
-          cashbackCurrency: wc_revolut_payment_request_params.currency,
-          variant: wc_revolut_payment_request_params.revolut_pay_button_theme,
-          size: wc_revolut_payment_request_params.revolut_pay_button_size,
-          radius: wc_revolut_payment_request_params.revolut_pay_button_radius,
-        },
-        mobileRedirectUrls: {
-          success: wc_revolut_payment_request_params.redirect_url,
-          failure: wc_revolut_payment_request_params.redirect_url,
-          cancel: wc_revolut_payment_request_params.redirect_url,
-        },
-        __metadata: {
-          environment: 'woocommerce',
-          context: wc_revolut_payment_request_params.is_cart_page ? 'cart' : 'product',
-          origin_url: wc_revolut_payment_request_params.revolut_pay_origin_url,
-        },
-      })
-
-      instance.revolutPay.on('payment', function (event) {
-        switch (event.type) {
-          case 'success':
-            $.blockUI({ message: null, overlayCSS: { background: '#fff', opacity: 0.6 } })
-            loadOrderData()
-              .then(function (order_data) {
-                address_info = order_data.address_info
-                orderSelectedShippingOption = order_data.selected_shipping_option
-                submitWooCommerceOrder('revolut_pay')
-                  .then(function () {
-                    submitOrder('', 'revolut_pay')
-                  })
-                  .catch(error => {
-                    displayErrorMessage([error])
-                    $.unblockUI()
-                    $('.blockUI.blockOverlay').hide()
-                  })
-              })
-              .catch(error => {
-                displayErrorMessage([error])
-                $.unblockUI()
-                $('.blockUI.blockOverlay').hide()
-              })
-            break
-          case 'error':
-            displayErrorMessage(event.error.message)
-            break
-        }
-      })
+    revolutPay.on('payment', function (event) {
+      switch (event.type) {
+        case 'success':
+          $.blockUI({ message: null, overlayCSS: { background: '#fff', opacity: 0.6 } })
+          loadOrderData()
+            .then(function (order_data) {
+              address_info = order_data.address_info
+              orderSelectedShippingOption = order_data.selected_shipping_option
+              submitWooCommerceOrder('revolut_pay')
+                .then(function () {
+                  submitOrder('', 'revolut_pay')
+                })
+                .catch(error => {
+                  displayErrorMessage([error])
+                  $.unblockUI()
+                  $('.blockUI.blockOverlay').hide()
+                })
+            })
+            .catch(error => {
+              displayErrorMessage([error])
+              $.unblockUI()
+              $('.blockUI.blockOverlay').hide()
+            })
+          break
+        case 'error':
+          displayErrorMessage(event.error.message)
+          break
+      }
     })
   }
 
@@ -540,7 +524,7 @@ jQuery(function ($) {
     }
   }
 
-  function sendRequest(url, data, logError = true) {
+  function sendRequest(url, data, shouldLogError = true) {
     const requestData = new FormData()
     buildFormData(requestData, data)
 
@@ -550,11 +534,31 @@ jQuery(function ($) {
     })
       .then(response => response.json())
       .catch(error => {
-        if (logError) {
+        if (shouldLogError) {
           logError(error)
         }
 
         throw error
       })
+  }
+  function getRevolutOrderPublicId() {
+    return new Promise((resolve, reject) => {
+      if (wc_revolut_payment_request_params.revolut_public_id) {
+        return resolve(wc_revolut_payment_request_params.revolut_public_id)
+      }
+
+      sendRequest(getAjaxURL('get_express_checkout_params'), {
+        security: wc_revolut_payment_request_params.nonce.get_express_checkout_params,
+      }).then(order => {
+        if (order.success) {
+          wc_revolut_payment_request_params.revolut_public_id = order.revolut_public_id
+          return resolve(order.revolut_public_id)
+        }
+
+        displayErrorMessage(
+          wc_revolut_payment_request_params.error_messages.checkout_general,
+        )
+      })
+    })
   }
 })

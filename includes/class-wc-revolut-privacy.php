@@ -96,6 +96,7 @@ class WC_Revolut_Privacy extends WC_Abstract_Privacy {
 
 		if ( 0 < count( $orders ) ) {
 			foreach ( $orders as $order ) {
+				$wc_order         = $this->wc_get_order( $order->get_id() );
 				$data_to_export[] = array(
 					'group_id'    => 'woocommerce_orders',
 					'group_label' => __( 'Orders', 'revolut-gateway-for-woocommerce' ),
@@ -103,7 +104,7 @@ class WC_Revolut_Privacy extends WC_Abstract_Privacy {
 					'data'        => array(
 						array(
 							'name'  => __( 'Revolut token', 'revolut-gateway-for-woocommerce' ),
-							'value' => get_post_meta( $order->get_id(), '_revolut_pre_order_token', true ),
+							'value' => $wc_order->get_meta( '_revolut_pre_order_token', true ),
 						),
 					),
 				);
@@ -156,19 +157,19 @@ class WC_Revolut_Privacy extends WC_Abstract_Privacy {
 	/**
 	 * Handle eraser of data tied to Orders
 	 *
-	 * @param WC_Order $order WooCommerce Order.
+	 * @param WC_Order $wc_order WooCommerce Order.
 	 *
 	 * @return array
 	 */
-	protected function maybe_handle_order( $order ) {
-		$order_id      = $order->get_id();
-		$revolut_token = get_post_meta( $order_id, '_revolut_pre_order_token', true );
+	protected function maybe_handle_order( $wc_order ) {
+		$order_id      = $wc_order->get_id();
+		$revolut_token = $wc_order->get_meta( '_revolut_pre_order_token', true );
 
 		if ( empty( $revolut_token ) ) {
 			return array( false, false, array() );
 		}
 
-		delete_post_meta( $order_id, '_revolut_pre_order_token' );
+		$wc_order->delete_meta_data( '_revolut_pre_order_token' );
 
 		return array( true, false, array( __( 'Revolut Order Data Erased.', 'revolut-gateway-for-woocommerce' ) ) );
 	}

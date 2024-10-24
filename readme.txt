@@ -1,14 +1,14 @@
 === Revolut Gateway for WooCommerce ===
 Contributors: revolutbusiness
-Tags: revolut, revolut business, revolut pay, payments, gateway, payment gateway, credit card, card
+Tags: revolut, revolut business, revolut pay, payments, gateway
 Requires at least: 4.4
-Tested up to: 6.3
-Stable tag: 4.9.0
-Requires PHP: 7.0
+Tested up to: 6.6.2
+Stable tag: 4.17.9
+Requires PHP: 7.2
 License: GPLv2 or later
 License URI: http://www.apache.org/licenses/LICENSE-2.0
 
-Save on accepting payments with the Revolut Gateway for WooCommerce plugin for your store. With Revolut, you can accept card payments in up to 22 currencies, access your funds quickly with next-day settlement, and manage your business's money all in one place.
+Save on accepting payments with the Revolut Gateway for WooCommerce plugin for your store. You can accept card payments in up to 22 currencies.
 
 == Description ==
 ## What does this plugin do for you
@@ -21,6 +21,7 @@ Save on accepting payments with the Revolut Gateway for WooCommerce plugin for y
 - Customize the payment actions (Authorize only or Authorize and capture)
 - Refund and capture payments directly from your WooCommerce admin section
 - Support for [WooCommerce subscriptions](https://woocommerce.com/products/woocommerce-subscriptions/)
+- Support for [WooCommerce Blocks](https://woocommerce.com/customize/)
 - Support for manual order creation
 - Support for payments with Apple Pay and Google Pay
 
@@ -97,6 +98,107 @@ To start accepting payments from your customers at great rates, install the plug
 5. The Revolut Pay Button settings
 
 == Changelog ==
+= 4.17.9 =
+* Adjusted promotional banners availability 
+
+= 4.17.8 =
+* Added Revolut promotional banners
+* Various stability improvements
+
+= 4.17.7 =
+* Various stability fixes
+
+= 4.17.6 =
+* Fixed a compatibility issue that caused cart page to crash
+
+= 4.17.5 =
+* Added Woocommerce Blocks Support for express payment methods in cart page.
+* Added Cardholder name field for card gateway block. 
+* Fixed an issue where Revolut Pay fails to redirect to confirmation page when payment is completed through mobile App.
+
+= 4.17.4 =
+* Added webhook signature verification
+
+= 4.17.3 =
+* Fixed Card gateway failure
+
+= 4.17.2 =
+* Added logic for collecting line items & proof of shipping
+
+= 4.17.1 =
+* Fixed Woo Blocks order processing
+
+= 4.17.0 =
+* Added Woocommerce Blocks plugin support for Apple Pay & Google Pay
+
+= 4.16.2 =
+* Fixed duplicated subscription payment issue
+
+= 4.16.1 =
+* Fixed checkout fields editing issue
+
+= 4.16.0 =
+* Added Woocommerce Blocks plugin support for Card payments & Revolut Pay
+
+= 4.15.0 =
+* Fixed an issue with Revolut Pay failing to update order amount in cart page
+* Fixed an issue with Apple/Google pay on customer payment page
+
+= 4.14.0 =
+* Addressed performance issues
+* Bumped wordpress compatibility version
+* Improved apple pay domain registration process
+
+= 4.13.0 =
+* Updated cardholder name field design 
+
+= 4.11.0 =
+* Improved Fast Checkout order creation process
+* Improved Apple Pay domain registration process
+* Improved supported payment gateway and currency checks
+
+= 4.10.1 =
+* Fixed card gateway issue
+
+= 4.10.0 =
+* Fixed payments capture issue on Revolut Pay webflow
+
+= 4.9.9 =
+* Fixed Fast Checkout address fields
+* Fixed Revolut Pay order processing at Order Pay page
+
+= 4.9.8 =
+* Fixed PHP8 compatibility 
+* Fixed loading screen issue for Order Pay page
+* Fixed optional address state field for fast checkout order processing
+
+= 4.9.7 =
+* Fixed duplicated orders
+* Updated Revolut Pay Fast Checkout order processing flow
+
+= 4.9.6 =
+* Added Woocommerce High-Performance Order Storage (HPOS) compatibility. 
+* Added additional security improvements.
+
+= 4.9.5 =
+* Fixed creating customer objects
+
+= 4.9.4 =
+* Fixed file system compatibility issue
+* Fixed Apple Pay country code issue
+
+= 4.9.3 =
+* Fixed location registration issue
+
+= 4.9.2 =
+* Updated payment gateway logos
+* Fixed payment request button issue
+* Fixed changing subscription payment method issue
+
+= 4.9.1 =
+* Fixed subscription renewal issue
+* Improved registering address validation endpoint for Fast checkout
+
 = 4.9.0 =
 * Improved Revolut Pay mobile redirects
 * Fixed saving customer ids

@@ -52,9 +52,197 @@ class Revolut_Webhook_Controller extends \WC_REST_Data_Controller {
 			'/' . $this->rest_base,
 			array(
 				'methods'             => \WP_REST_Server::ALLMETHODS,
-				'callback'            => array( $this, 'handle_revolut_webhook_callbacks' ),
-				'permission_callback' => array( $this, 'handle_revolut_webhook_callbacks_permissions_check' ),
+				'callback'            => array( $this, 'handle_revolut_webhook_deprecated_endpoint' ),
+				'permission_callback' => function ( $request = null ) {
+					return true;
+				},
 			)
+		);
+
+		register_rest_route(
+			$this->namespace,
+			'/' . $this->rest_base . '/webhook/sandbox',
+			array(
+				'methods'             => \WP_REST_Server::ALLMETHODS,
+				'callback'            => array( $this, 'handle_revolut_webhook' ),
+				'permission_callback' => array( $this, 'revolut_webhook_permission_callback_sandbox' ),
+			)
+		);
+
+		register_rest_route(
+			$this->namespace,
+			'/' . $this->rest_base . '/webhook/live',
+			array(
+				'methods'             => \WP_REST_Server::ALLMETHODS,
+				'callback'            => array( $this, 'handle_revolut_webhook' ),
+				'permission_callback' => array( $this, 'revolut_webhook_permission_callback_live' ),
+			)
+		);
+
+		register_rest_route(
+			$this->namespace,
+			'/' . $this->rest_base . '/address/validation/webhook/sandbox',
+			array(
+				'methods'             => \WP_REST_Server::ALLMETHODS,
+				'callback'            => array( $this, 'handle_revolut_address_validation_webhook' ),
+				'permission_callback' => array( $this, 'revolut_address_validation_webhook_permission_callback_sandbox' ),
+			)
+		);
+
+		register_rest_route(
+			$this->namespace,
+			'/' . $this->rest_base . '/address/validation/webhook/live',
+			array(
+				'methods'             => \WP_REST_Server::ALLMETHODS,
+				'callback'            => array( $this, 'handle_revolut_address_validation_webhook' ),
+				'permission_callback' => array( $this, 'revolut_address_validation_webhook_permission_callback_live' ),
+			)
+		);
+	}
+
+
+	/**
+	 * Permissions check
+	 *
+	 * @param WP_REST_Request $request Full details about the request.
+	 *
+	 * @return bool
+	 */
+	public function revolut_address_validation_webhook_permission_callback_live( $request = null ) {
+		$signing_secret = get_option( 'revolut_pay_synchronous_webhook_domain_live_signing_key' );
+		return $this->revolut_address_validation_webhook_permission_callback( $request, $signing_secret );
+	}
+
+	/**
+	 * Permissions check
+	 *
+	 * @param WP_REST_Request $request Full details about the request.
+	 *
+	 * @return bool
+	 */
+	public function revolut_address_validation_webhook_permission_callback_sandbox( $request = null ) {
+		$signing_secret = get_option( 'revolut_pay_synchronous_webhook_domain_sandbox_signing_key' );
+		return $this->revolut_address_validation_webhook_permission_callback( $request, $signing_secret );
+	}
+
+	/**
+	 * Permissions check
+	 *
+	 * @param WP_REST_Request $request Full details about the request.
+	 *
+	 * @return bool
+	 */
+	public function revolut_webhook_permission_callback_sandbox( $request = null ) {
+		$signing_secret = get_option( 'sandbox_revolut_webhook_domain_signing_secret' );
+		return $this->revolut_webhook_permission_callback( $request, $signing_secret );
+	}
+
+	/**
+	 * Permissions check
+	 *
+	 * @param WP_REST_Request $request Full details about the request.
+	 *
+	 * @return bool
+	 */
+	public function revolut_webhook_permission_callback_live( $request = null ) {
+		$signing_secret = get_option( 'live_revolut_webhook_domain_signing_secret' );
+		return $this->revolut_webhook_permission_callback( $request, $signing_secret );
+	}
+
+	/**
+	 * Permissions check
+	 *
+	 * @param WP_REST_Request $request Full details about the request.
+	 * @param string          $signing_secret secret key for signing the request.
+	 *
+	 * @return bool
+	 */
+	public function revolut_address_validation_webhook_permission_callback( $request, $signing_secret ) {
+		if ( empty( $signing_secret ) ) {
+			return false;
+		}
+
+		$received_signature = $request->get_header( 'Revolut-Pay-Payload-Signature' );
+
+		if ( empty( $received_signature ) ) {
+			return false;
+		}
+
+		$calculated_signature = hash_hmac( 'sha256', $request->get_body(), $signing_secret );
+
+		return hash_equals( $calculated_signature, $received_signature );
+	}
+
+	/**
+	 * Permissions check
+	 *
+	 * @param WP_REST_Request $request Full details about the request.
+	 * @param string          $signing_secret secret key for signing the request.
+	 *
+	 * @return bool
+	 */
+	public function revolut_webhook_permission_callback( $request, $signing_secret ) {
+		if ( empty( $signing_secret ) ) {
+			return false;
+		}
+
+		$request_timestamp  = $request->get_header( 'Revolut-Request-Timestamp' );
+		$received_signature = $request->get_header( 'Revolut-Signature' );
+
+		if ( empty( $request_timestamp ) || empty( $received_signature ) ) {
+			return false;
+		}
+
+		$payload_to_sign = 'v1.' . $request_timestamp . '.' . $request->get_body();
+
+		$calculated_signature = 'v1=' . hash_hmac( 'sha256', $payload_to_sign, $signing_secret );
+
+		return hash_equals( $calculated_signature, $received_signature );
+	}
+
+	/**
+	 * Revolut webhook callback request
+	 *
+	 * @param WP_REST_Request $request WP REST Request.
+	 *
+	 * @return WP_Error|WP_REST_Response
+	 */
+	public function handle_revolut_address_validation_webhook( $request ) {
+		$parameters = $request->get_params();
+
+		$this->convert_revolut_order_metadata_into_wc_session( $parameters['order_id'] );
+
+		$requested_address              = $parameters['shipping_address'];
+		$requested_address['address']   = $requested_address['street_line_1'];
+		$requested_address['address_2'] = '';
+		$requested_address['state']     = ! empty( $requested_address['region'] ) ? $requested_address['region'] : '';
+
+		$country  = $requested_address['country'];
+		$postcode = $requested_address['postcode'];
+
+		$postcode          = wc_format_postcode( $postcode, $country );
+		$is_valid_postcode = WC_Validation::is_postcode( $postcode, $country );
+
+		if ( ! $is_valid_postcode ) {
+			$this->log_info( 'Invalid postcode info: ' . $postcode );
+
+			return new WP_REST_Response(
+				array(
+					'valid'            => false,
+					'delivery_methods' => array(),
+				),
+				200
+			);
+		}
+
+		$shipping_options = $this->get_shipping_options( $requested_address );
+
+		return new WP_REST_Response(
+			array(
+				'valid'            => (bool) count( $shipping_options ),
+				'delivery_methods' => $shipping_options,
+			),
+			200
 		);
 	}
 
@@ -65,62 +253,15 @@ class Revolut_Webhook_Controller extends \WC_REST_Data_Controller {
 	 *
 	 * @return WP_Error|WP_REST_Response
 	 */
-	public function handle_revolut_webhook_callbacks( $request ) {
+	public function handle_revolut_webhook( $request ) {
 		$parameters = $request->get_params();
 		$order_id   = '';
-		$event      = '';
 
 		$this->log_info( 'start handle_revolut_webhook_callbacks' );
 		$this->log_info( $parameters );
 
-		if ( in_array( 'shipping_address', array_keys( $parameters ), true ) ) {
-			$this->convert_revolut_order_metadata_into_wc_session( $parameters['order_id'] );
-			$requested_address              = $parameters['shipping_address'];
-			$requested_address['address']   = $requested_address['street_line_1'];
-			$requested_address['address_2'] = '';
-			$requested_address['state']     = ! empty( $requested_address['region'] ) ? $requested_address['region'] : '';
-
-			$country  = $requested_address['country'];
-			$postcode = $requested_address['postcode'];
-
-			$postcode          = wc_format_postcode( $postcode, $country );
-			$is_valid_postcode = WC_Validation::is_postcode( $postcode, $country );
-
-			if ( ! $is_valid_postcode ) {
-				$this->log_info( 'Invalid postcode info: ' . $postcode );
-
-				return new WP_REST_Response(
-					array(
-						'valid'            => false,
-						'delivery_methods' => array(),
-					),
-					200
-				);
-			}
-
-			$shipping_options = $this->get_shipping_options( $requested_address );
-
-			$this->log_info(
-				array(
-					'wc_order_total'      => WC()->cart->get_total( '' ),
-					'get_current_user_id' => get_current_user_id(),
-					'valid'               => (bool) count( $shipping_options ),
-					'delivery_methods'    => $shipping_options,
-				)
-			);
-
-			return new WP_REST_Response(
-				array(
-					'valid'            => (bool) count( $shipping_options ),
-					'delivery_methods' => $shipping_options,
-				),
-				200
-			);
-		}
-
-		if ( isset( $parameters['order_id'] ) && isset( $parameters['event'] ) ) {
+		if ( isset( $parameters['order_id'] ) && isset( $parameters['event'] ) && 'ORDER_COMPLETED' === $parameters['event'] ) {
 			$order_id = $parameters['order_id'];
-			$event    = $parameters['event'];
 		}
 
 		if ( empty( $order_id ) ) {
@@ -128,7 +269,6 @@ class Revolut_Webhook_Controller extends \WC_REST_Data_Controller {
 			$parameters = json_decode( $parameters, true );
 			if ( isset( $parameters['order_id'] ) && isset( $parameters['event'] ) ) {
 				$order_id = $parameters['order_id'];
-				$event    = $parameters['event'];
 			}
 		}
 
@@ -148,50 +288,49 @@ class Revolut_Webhook_Controller extends \WC_REST_Data_Controller {
 
 		$wc_order = wc_get_order( $wc_order_id['wc_order_id'] );
 
-		if ( ! $wc_order ) {
+		if ( ! $wc_order || ! empty( $wc_order->get_transaction_id() ) ) {
 			return new WP_REST_Response( array( 'status' => 'Failed' ), 422 );
 		}
 
 		$wc_order_status = empty( $wc_order->get_status() ) ? '' : $wc_order->get_status();
 		$check_wc_status = 'processing' === $wc_order_status || 'completed' === $wc_order_status;
-		$check_capture   = isset( get_post_meta( $wc_order_id['wc_order_id'], 'revolut_capture' )[0] ) ? get_post_meta( $wc_order_id['wc_order_id'], 'revolut_capture' )[0] : '';
+		$check_capture   = isset( $wc_order->get_meta( 'revolut_capture' )[0] ) ? $wc_order->get_meta( 'revolut_capture' )[0] : '';
 
 		$data = array();
-		if ( 'yes' !== $check_capture ) {
-			if ( ! empty( $wc_order ) && empty( $wc_order->get_transaction_id() ) && ! $check_wc_status ) {
-				if ( 'ORDER_COMPLETED' === $event ) {
-					/* translators: %s: Revolut Order ID. */
-					$wc_order->add_order_note( sprintf( __( 'Payment has been successfully captured (Order ID: %s)', 'revolut-gateway-for-woocommerce' ), $order_id ) );
-					$wc_order->payment_complete( $order_id );
-					update_post_meta( $wc_order_id['wc_order_id'], 'revolut_capture', 'yes' );
-					$data = array(
-						'status'   => 'OK',
-						'response' => 'Completed',
-					);
-				} else {
-					$data = array(
-						'status' => 'Failed',
-					);
-				}
-			}
-		} else {
-			$data = array(
-				'status' => 'Failed',
-			);
+
+		if ( 'yes' === $check_capture || $check_wc_status ) {
+			return new WP_REST_Response( array( 'status' => 'Failed' ), 422 );
 		}
+
+		/* translators: %s: Revolut Order ID. */
+		$wc_order->add_order_note( sprintf( __( 'Payment has been successfully captured (Order ID: %s)', 'revolut-gateway-for-woocommerce' ), $order_id ) );
+		$wc_order->payment_complete( $order_id );
+		$wc_order->update_meta_data( 'revolut_capture', 'yes', $wc_order_id['wc_order_id'] );
+		$wc_order->save();
+
+		$data = array(
+			'status'   => 'OK',
+			'response' => 'Completed',
+		);
 
 		return new WP_REST_Response( $data, 200 );
 	}
 
 	/**
-	 * Permissions check
+	 * Revolut webhook callback request
 	 *
-	 * @param WP_REST_Request $request Full details about the request.
+	 * @param WP_REST_Request $request WP REST Request.
 	 *
-	 * @return bool
+	 * @return WP_Error|WP_REST_Response
 	 */
-	public function handle_revolut_webhook_callbacks_permissions_check( $request = null ) {
-		return true;
+	public function handle_revolut_webhook_deprecated_endpoint( $request ) {
+		$parameters = $request->get_params();
+
+		if ( in_array( 'shipping_address', array_keys( $parameters ), true ) ) {
+			return $this->handle_revolut_address_validation_webhook( $request );
+		}
+
+		return $this->handle_revolut_webhook( $request );
 	}
 
 	/**

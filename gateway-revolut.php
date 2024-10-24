@@ -6,16 +6,16 @@
  * Author: Revolut
  * Author URI: https://www.revolut.com/business/online-payments
  * Text Domain: revolut-gateway-for-woocommerce
- * Version: 4.9.0
+ * Version: 4.17.9
  * Requires at least: 4.4
- * Tested up to: 6.1
- * WC tested up to: 6.5
+ * Tested up to: 6.6.2
+ * WC tested up to: 9.3.3
  * WC requires at least: 2.6
  */
 
 defined( 'ABSPATH' ) || exit;
 define( 'REVOLUT_PATH', plugin_dir_path( __FILE__ ) );
-define( 'WC_GATEWAY_REVOLUT_VERSION', '4.9.0' );
+define( 'WC_GATEWAY_REVOLUT_VERSION', '4.17.9' );
 define( 'WC_GATEWAY_PUBLIC_KEY_ENDPOINT', '/public-key/latest' );
 define( 'WC_GATEWAY_REVPAY_INDEX', 'USE_REVOLUT_PAY_2_0' );
 define( 'WC_REVOLUT_WAIT_FOR_ORDER_TIME', 2 );
@@ -52,6 +52,7 @@ function woocommerce_revolut_init() {
 	add_filter( 'woocommerce_payment_gateways', 'woocommerce_revolut_add_gateways' );
 	add_action( 'init', 'woocommerce_revolut_load_rest_api' );
 	add_action( 'wp_loaded', 'rest_api_includes' );
+	add_action( 'before_woocommerce_init', 'declare_features_compatibility' );
 }
 
 /**
@@ -62,6 +63,50 @@ function rest_api_includes() {
 	require_once WC_ABSPATH . 'includes/wc-notice-functions.php';
 }
 
+/**
+ * Declare compatibility with plugins and features.
+ */
+function declare_features_compatibility() {
+	if ( class_exists( Automattic\WooCommerce\Utilities\FeaturesUtil::class ) ) {
+		Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'custom_order_tables', __FILE__, true );
+		Automattic\WooCommerce\Utilities\FeaturesUtil::declare_compatibility( 'cart_checkout_blocks', __FILE__, true );
+	}
+}
+add_action( 'woocommerce_blocks_loaded', 'initiate_gateway_block_support' );
+
+/**
+ * Registers action to initiate block based payment methods.
+ */
+function initiate_gateway_block_support() {
+
+	if ( class_exists( 'Automattic\WooCommerce\Blocks\Payments\Integrations\AbstractPaymentMethodType' ) ) {
+		require_once REVOLUT_PATH . 'includes/class-wc-gateway-revolut-cc-blocks-support.php';
+		require_once REVOLUT_PATH . 'includes/class-wc-gateway-revolut-pay-blocks-support.php';
+		require_once REVOLUT_PATH . 'includes/class-wc-gateway-revolut-payment-request-blocks-support.php';
+		add_action(
+			'woocommerce_blocks_payment_method_type_registration',
+			function( Automattic\WooCommerce\Blocks\Payments\PaymentMethodRegistry $payment_method_registry ) {
+				$gateways     = WC()->payment_gateways()->payment_gateways();
+				$gateways_ids = array_keys( $gateways );
+
+				if ( in_array( WC_Gateway_Revolut_CC::GATEWAY_ID, $gateways_ids, true ) ) {
+					$payment_method_registry->register( new WC_Gateway_Revolut_CC_Blocks_Support( $gateways[ WC_Gateway_Revolut_CC::GATEWAY_ID ] ) );
+				}
+
+				if ( in_array( WC_Gateway_Revolut_Pay::GATEWAY_ID, $gateways_ids, true ) ) {
+					$payment_method_registry->register( new WC_Gateway_Revolut_Pay_Blocks_Support( $gateways[ WC_Gateway_Revolut_Pay::GATEWAY_ID ] ) );
+				}
+
+				if ( in_array( WC_Gateway_Revolut_Payment_Request::GATEWAY_ID, $gateways_ids, true ) ) {
+					$payment_method_registry->register( new WC_Gateway_Revolut_Payment_Request_Blocks_Support( $gateways[ WC_Gateway_Revolut_Payment_Request::GATEWAY_ID ] ) );
+				}
+
+			},
+			5
+		);
+
+	}
+}
 /**
  * Load API function
  */
@@ -224,7 +269,12 @@ function woocommerce_revolut_load_admin_scripts() {
 		array(
 			'default_bg_color'   => WC_REVOLUT_CARD_WIDGET_BG_COLOR,
 			'default_text_color' => WC_REVOLUT_CARD_WIDGET_TEXT_COLOR,
+			'nonce'              => array(
+				'wc_revolut_clear_records'           => wp_create_nonce( 'wc-revolut-clear-records' ),
+				'wc_revolut_onboard_applepay_domain' => wp_create_nonce( 'wc-revolut-onboard-applepay-domain' ),
+			),
 		)
 	);
+
 	wp_enqueue_script( 'revolut-settings' );
 }

@@ -115,6 +115,7 @@ jQuery(document).ready(function ($) {
       url: ajaxurl,
       data: {
         action: 'wc_revolut_onboard_applepay_domain',
+        _wpnonce: default_options.nonce.wc_revolut_onboard_applepay_domain,
       },
       success: function (response) {
         let message = ''
@@ -217,6 +218,7 @@ jQuery(document).ready(function ($) {
       url: ajaxurl,
       data: {
         action: 'wc_revolut_clear_records',
+        _wpnonce: default_options.nonce.wc_revolut_clear_records,
       },
       success: function (response) {
         $.unblockUI()
